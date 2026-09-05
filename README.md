@@ -1,159 +1,289 @@
 # Pulse
 
-<p align="center">
-  <strong>Real-time audio visualization for Windows</strong>
-</p>
+**Pulse is a real-time audio visualizer for Windows, built with C++ and JUCE.**
 
-<p align="center">
-  A lightweight C++ / JUCE audio visualizer featuring a live FFT spectrum and stereo goniometer.
-</p>
+It analyzes system audio and turns it into a live visual representation with a frequency spectrum, stereo goniometer, and level metering.
 
----
+The project is inspired by the visual style and experience of modern audio monitoring tools, with a focus on a clean, responsive interface.
 
-## 🎧 About
-
-**Pulse** is a real-time audio visualization application built for Windows using **C++17** and the **JUCE framework**.
-
-Pulse analyzes incoming system audio and transforms it into live visualizations, including:
-
-- Real-time frequency spectrum
-- Fast and slow spectrum traces
-- Stereo goniometer
-- Audio level monitoring
-- Logarithmic frequency distribution
-
-The goal is to create a clean, responsive desktop audio visualization experience for Windows.
+> **Status:** Active development
 
 ---
 
 ## ✨ Features
 
-### 📊 Real-Time Spectrum Analyzer
+### Real-time Spectrum Analyzer
 
-Pulse uses FFT-based analysis to visualize the frequency content of incoming audio.
+* Live frequency spectrum visualization
+* FFT-based audio analysis
+* Logarithmic frequency distribution
+* Fast live spectrum response
+* Slower reference trace for visual persistence
+* Frequency scale from low to high frequencies
 
-Features include:
+### 🎚️ Level Metering
 
-- Real-time FFT processing
-- Logarithmic frequency distribution
-- 20 Hz to the upper audible frequency range
-- Fast live spectrum response
-- Slower reference spectrum trace
-- Smooth visual decay
-- Dynamic frequency response
+* Real-time audio level monitoring
+* Dynamic response to incoming audio
+* Designed for continuous audio visualization
 
 ### 🎛️ Stereo Goniometer
 
-The goniometer provides a real-time representation of the stereo field.
+* Real-time stereo field visualization
+* Mid/Side-based stereo representation
+* Visual response to left/right stereo movement
+* Circular stereo field display
 
-It can be used to visually observe:
+### 🎨 Interface
 
-- Stereo width
-- Left/right balance
-- Centered signals
-- Stereo movement
-- Correlation between channels
-
-### 🔊 Audio Level Detection
-
-Pulse continuously analyzes the incoming audio level and uses it to drive the visual interface.
-
-### 🖥️ Windows Application
-
-Pulse is currently designed specifically for:
-
-**Windows**
-
-The project uses JUCE for audio-device handling and the graphical interface.
+* Dark audio-monitoring style interface
+* Custom Pulse visual theme
+* Dedicated visualization components
+* Designed around real-time visual feedback
 
 ---
 
-# 🖼️ Preview
+## 🖥️ Platform
 
-Pulse's interface contains the main spectrum visualization together with the stereo goniometer and audio monitoring area.
+Currently developed and tested for:
 
-> Screenshots and demo media will be added as the project develops.
+* **Windows**
 
----
-
-# 🙏 Inspiration & Credits
-
-Pulse is inspired by the excellent **fxsound-mac** project created by **@okku007**.
-
-The original project is a macOS-focused audio visualizer and was the primary inspiration for the concept and visual direction of Pulse.
-
-Pulse is an independent **Windows implementation inspired by that project**, built using C++ and JUCE with the goal of bringing a similar audio-visualization experience to Windows.
-
-### Original Project
-
-**fxsound-mac**  
-Author: **@okku007**
-
-Repository:
-
-`okku007/fxsound-mac`
-
-All credit for the original inspiration and concept goes to the original project and its author.
-
-Pulse is **not affiliated with, sponsored by, or endorsed by** the original `fxsound-mac` project or its author.
+The project uses JUCE and CMake, with Windows audio support provided through the JUCE audio-device layer.
 
 ---
 
-# 🛠️ Technology
+## 🛠️ Technology
 
 Pulse is built using:
 
-- **C++17**
-- **JUCE 9.0.1**
-- **CMake 3.22+**
-- **Visual Studio / MSVC**
-- **Windows**
+* **C++17**
+* **JUCE 9.0.1**
+* **CMake**
+* **Visual Studio / MSVC**
 
-JUCE is downloaded automatically by CMake using `FetchContent`.
-
-You do **not** need to manually download or copy JUCE into the Pulse repository.
-
----
-
-# 📋 Requirements
-
-Before building Pulse, make sure you have:
-
-### Required
-
-- Windows 10 or newer
-- Git
-- CMake 3.22 or newer
-- Visual Studio 2022 or newer
-- Visual Studio C++ Desktop Development workload
-- A working Windows audio device
-
-### Visual Studio Workload
-
-During Visual Studio installation, make sure this workload is installed:
-
-**Desktop development with C++**
-
-The installation should include:
-
-- MSVC compiler
-- Windows SDK
-- CMake tools for Windows
+JUCE is fetched automatically by CMake, so it does not need to be manually copied into this repository.
 
 ---
 
 # 🚀 Installation
 
-There are currently two ways to use Pulse.
-
 ## Option 1 — Download a Release
 
-When a packaged release is available:
+The easiest way to use Pulse is to download the latest Windows release from the **Releases** section of this repository.
 
-1. Open the latest GitHub Release.
-2. Download the Windows ZIP file.
-3. Extract the ZIP.
-4. Run:
+1. Open the latest release.
+2. Download the Windows `.zip`.
+3. Extract it.
+4. Run `Pulse.exe`.
+
+> Releases will be added as stable builds become available.
+
+---
+
+# 🔨 Build From Source
+
+## Requirements
+
+Before building Pulse, install:
+
+* Git
+* CMake 3.22 or newer
+* Visual Studio with C++ desktop development tools
+* A working Windows audio device
+
+---
+
+## Clone the repository
+
+```powershell
+git clone https://github.com/Jay19050/Pulse.git
+cd Pulse
+```
+
+## Configure the project
+
+```powershell
+cmake -S . -B build -G "Visual Studio 18 2026"
+```
+
+## Build Pulse
+
+```powershell
+cmake --build build --config Release
+```
+
+## Run Pulse
+
+```powershell
+.\build\Pulse_artefacts\Release\Pulse.exe
+```
+
+### One-command build
+
+After cloning, the complete build process can be performed with:
+
+```powershell
+git clone https://github.com/Jay19050/Pulse.git; cd Pulse; cmake -S . -B build -G "Visual Studio 18 2026"; cmake --build build --config Release
+```
+
+The generated executable will be located at:
 
 ```text
-Pulse.exe
+build\Pulse_artefacts\Release\Pulse.exe
+```
+
+---
+
+# 📁 Project Structure
+
+```text
+Pulse/
+│
+├── Source/
+│   ├── AudioEngine.cpp
+│   ├── AudioEngine.h
+│   ├── GoniometerComponent.cpp
+│   ├── GoniometerComponent.h
+│   ├── LevelMeterComponent.cpp
+│   ├── LevelMeterComponent.h
+│   ├── Main.cpp
+│   ├── MainComponent.cpp
+│   ├── MainComponent.h
+│   ├── PulseTheme.h
+│   ├── SpectrumAnalyzer.cpp
+│   ├── SpectrumAnalyzer.h
+│   ├── VisualizerComponent.cpp
+│   └── VisualizerComponent.h
+│
+├── CMakeLists.txt
+├── .gitignore
+├── README.md
+└── LICENSE
+```
+
+### Main components
+
+| Component             | Purpose                           |
+| --------------------- | --------------------------------- |
+| `AudioEngine`         | Audio device and audio processing |
+| `SpectrumAnalyzer`    | FFT and frequency analysis        |
+| `VisualizerComponent` | Spectrum visualization            |
+| `GoniometerComponent` | Stereo field visualization        |
+| `LevelMeterComponent` | Audio level visualization         |
+| `PulseTheme`          | Application visual styling        |
+| `MainComponent`       | Main application interface        |
+
+---
+
+# 🎯 Development Status
+
+Pulse is currently under active development.
+
+### Working
+
+* [x] CMake project
+* [x] JUCE integration
+* [x] Windows application
+* [x] Real-time audio input
+* [x] FFT spectrum analysis
+* [x] Spectrum visualization
+* [x] Stereo goniometer
+* [x] Level metering
+* [x] Custom dark UI
+
+### In development
+
+* [ ] Further spectrum response tuning
+* [ ] Lower-latency visualization
+* [ ] Improved stereo visualization behavior
+* [ ] Improved audio-device compatibility
+* [ ] UI refinement
+* [ ] Packaged Windows releases
+* [ ] Installation/distribution workflow
+
+---
+
+# 🗺️ Roadmap
+
+The long-term goal is to turn Pulse into a polished desktop audio visualization and monitoring application.
+
+Planned areas include:
+
+* More responsive visual animations
+* Improved spectrum rendering
+* More accurate stereo-field visualization
+* Better audio-device handling
+* Configurable visualization settings
+* Additional audio-analysis tools
+* Improved Windows distribution
+* Installer support
+* Performance optimization
+
+---
+
+# 🧑‍💻 Development
+
+Clone the repository:
+
+```powershell
+git clone https://github.com/Jay19050/Pulse.git
+cd Pulse
+```
+
+Configure:
+
+```powershell
+cmake -S . -B build -G "Visual Studio 18 2026"
+```
+
+Build:
+
+```powershell
+cmake --build build --config Release
+```
+
+After making changes:
+
+```powershell
+cmake --build build --config Release
+```
+
+---
+
+# 🤝 Contributing
+
+Pulse is currently primarily developed as an independent project.
+
+Issues, suggestions, and improvements are welcome.
+
+If you want to contribute, please open an issue first for larger changes so the direction can be discussed before implementation.
+
+## 🙏 Inspiration & Credits
+
+Pulse is inspired by the excellent **[fxsound-mac](https://github.com/okku007/fxsound-mac)** project by **[@okku007](https://github.com/okku007)**.
+
+`fxsound-mac` is a macOS-focused audio visualizer that served as the primary inspiration for the concept and visual direction of Pulse.
+
+Pulse is an independent **Windows implementation inspired by that project**, built from the ground up using C++ and JUCE with the goal of bringing a similar audio-visualization experience to Windows.
+
+### Original Project
+
+* **fxsound-mac:** https://github.com/okku007/fxsound-mac
+* **Author:** [@okku007](https://github.com/okku007)
+
+All credit for the original inspiration and concept goes to the original project and its author.
+
+===
+
+## Author
+
+**Jay19050**
+
+GitHub: https://github.com/Jay19050
+
+---
+
+<p align="center">
+  Built with C++ and JUCE.
+</p>
