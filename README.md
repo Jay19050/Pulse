@@ -10,7 +10,7 @@ The project is inspired by the visual style and experience of modern audio monit
 
 ---
 
-## ✨ Features
+##  Features
 
 ### Real-time Spectrum Analyzer
 
@@ -21,20 +21,20 @@ The project is inspired by the visual style and experience of modern audio monit
 * Slower reference trace for visual persistence
 * Frequency scale from low to high frequencies
 
-### 🎚️ Level Metering
+###  Level Metering
 
 * Real-time audio level monitoring
 * Dynamic response to incoming audio
 * Designed for continuous audio visualization
 
-### 🎛️ Stereo Goniometer
+###  Stereo Goniometer
 
 * Real-time stereo field visualization
 * Mid/Side-based stereo representation
 * Visual response to left/right stereo movement
 * Circular stereo field display
 
-### 🎨 Interface
+###  Interface
 
 * Dark audio-monitoring style interface
 * Custom Pulse visual theme
@@ -43,7 +43,7 @@ The project is inspired by the visual style and experience of modern audio monit
 
 ---
 
-## 🖥️ Platform
+##  Platform
 
 Currently developed and tested for:
 
@@ -53,7 +53,7 @@ The project uses JUCE and CMake, with Windows audio support provided through the
 
 ---
 
-## 🛠️ Technology
+##  Technology
 
 Pulse is built using:
 
@@ -66,7 +66,7 @@ JUCE is fetched automatically by CMake, so it does not need to be manually copie
 
 ---
 
-# 🚀 Installation
+#  Installation
 
 ## Option 1 — Download a Release
 
@@ -81,7 +81,7 @@ The easiest way to use Pulse is to download the latest Windows release from the 
 
 ---
 
-# 🔨 Build From Source
+#  Build From Source
 
 ## Requirements
 
@@ -94,48 +94,8 @@ Before building Pulse, install:
 
 ---
 
-## Clone the repository
 
-```powershell
-git clone https://github.com/Jay19050/Pulse.git
-cd Pulse
-```
-
-## Configure the project
-
-```powershell
-cmake -S . -B build -G "Visual Studio 18 2026"
-```
-
-## Build Pulse
-
-```powershell
-cmake --build build --config Release
-```
-
-## Run Pulse
-
-```powershell
-.\build\Pulse_artefacts\Release\Pulse.exe
-```
-
-### One-command build
-
-After cloning, the complete build process can be performed with:
-
-```powershell
-git clone https://github.com/Jay19050/Pulse.git; cd Pulse; cmake -S . -B build -G "Visual Studio 18 2026"; cmake --build build --config Release
-```
-
-The generated executable will be located at:
-
-```text
-build\Pulse_artefacts\Release\Pulse.exe
-```
-
----
-
-# 📁 Project Structure
+#  Project Structure
 
 ```text
 Pulse/
@@ -176,7 +136,7 @@ Pulse/
 
 ---
 
-# 🎯 Development Status
+#  Development Status
 
 Pulse is currently under active development.
 
@@ -204,7 +164,7 @@ Pulse is currently under active development.
 
 ---
 
-# 🗺️ Roadmap
+#  Roadmap
 
 The long-term goal is to turn Pulse into a polished desktop audio visualization and monitoring application.
 
@@ -222,7 +182,7 @@ Planned areas include:
 
 ---
 
-# 🧑‍💻 Development
+#  Development
 
 Clone the repository:
 
@@ -251,7 +211,7 @@ cmake --build build --config Release
 
 ---
 
-# 🤝 Contributing
+#  Contributing
 
 Pulse is currently primarily developed as an independent project.
 
@@ -259,7 +219,7 @@ Issues, suggestions, and improvements are welcome.
 
 If you want to contribute, please open an issue first for larger changes so the direction can be discussed before implementation.
 
-## 🙏 Inspiration & Credits
+##  Inspiration & Credits
 
 Pulse is inspired by the excellent **[fxsound-mac](https://github.com/okku007/fxsound-mac)** project by **[@okku007](https://github.com/okku007)**.
 
