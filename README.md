@@ -21,6 +21,18 @@ The project is inspired by the visual style and experience of modern audio monit
 * Slower reference trace for visual persistence
 * Frequency scale from low to high frequencies
 
+###  Multiple Visualizer Modes
+
+* Six switchable real-time visualizer modes, all driven by the same shared audio-analysis pipeline (no per-mode FFT):
+  * **Spectrum** — the original LIVE / AVG / PEAK HOLD view, with a collapsible legend, hover readout, and per-trace visibility toggles
+  * **Filled Spectrum** — a clean, single-trace filled version of the spectrum
+  * **Waveform** — a real-time scrolling oscilloscope of the raw audio signal
+  * **Circular** — a 360° radial spectrum with a peak-hold ring
+  * **Mirror** — a symmetrical bar spectrum mirrored above/below a centerline
+  * **Particles** — an audio-reactive particle field tracing the spectrum shape
+* Compact, custom-painted mode-selector strip — switch modes live, no restart required
+* Every mode goes idle/flat automatically when there's no audio — nothing is faked or randomly animated
+
 ###  Level Metering
 
 * Real-time audio level monitoring
@@ -113,8 +125,24 @@ Pulse/
 │   ├── PulseTheme.h
 │   ├── SpectrumAnalyzer.cpp
 │   ├── SpectrumAnalyzer.h
+│   ├── VisualizerMode.h
 │   ├── VisualizerComponent.cpp
-│   └── VisualizerComponent.h
+│   ├── VisualizerComponent.h
+│   ├── VisualizerModeManager.cpp
+│   ├── VisualizerModeManager.h
+│   ├── CurveUtils.h
+│   ├── WaveformBuffer.cpp
+│   ├── WaveformBuffer.h
+│   ├── ModeFilledSpectrum.cpp
+│   ├── ModeFilledSpectrum.h
+│   ├── ModeWaveform.cpp
+│   ├── ModeWaveform.h
+│   ├── ModeCircular.cpp
+│   ├── ModeCircular.h
+│   ├── ModeMirror.cpp
+│   ├── ModeMirror.h
+│   ├── ModeParticles.cpp
+│   └── ModeParticles.h
 │
 ├── CMakeLists.txt
 ├── .gitignore
@@ -124,15 +152,23 @@ Pulse/
 
 ### Main components
 
-| Component             | Purpose                           |
-| --------------------- | --------------------------------- |
-| `AudioEngine`         | Audio device and audio processing |
-| `SpectrumAnalyzer`    | FFT and frequency analysis        |
-| `VisualizerComponent` | Spectrum visualization            |
-| `GoniometerComponent` | Stereo field visualization        |
-| `LevelMeterComponent` | Audio level visualization         |
-| `PulseTheme`          | Application visual styling        |
-| `MainComponent`       | Main application interface        |
+| Component               | Purpose                                           |
+| ------------------------ | -------------------------------------------------- |
+| `AudioEngine`            | Audio device and audio processing                  |
+| `SpectrumAnalyzer`       | FFT and frequency analysis (shared by every mode)  |
+| `VisualizerMode`         | Common interface implemented by every visualizer mode |
+| `VisualizerModeManager`  | Owns all modes, handles switching + selector strip |
+| `VisualizerComponent`    | Spectrum mode (LIVE / AVG / PEAK HOLD + legend)    |
+| `ModeFilledSpectrum`     | Filled Spectrum mode                               |
+| `ModeWaveform`           | Waveform (oscilloscope) mode                       |
+| `ModeCircular`           | Circular spectrum mode                             |
+| `ModeMirror`             | Mirror spectrum mode                               |
+| `ModeParticles`          | Particles mode                                     |
+| `WaveformBuffer`         | Rolling raw-sample buffer feeding Waveform mode     |
+| `GoniometerComponent`    | Stereo field visualization                         |
+| `LevelMeterComponent`    | Audio level visualization                          |
+| `PulseTheme`             | Application visual styling                         |
+| `MainComponent`          | Main application interface                         |
 
 ---
 
@@ -151,6 +187,8 @@ Pulse is currently under active development.
 * [x] Stereo goniometer
 * [x] Level metering
 * [x] Custom dark UI
+* [x] Multiple visualizer modes (Spectrum, Filled Spectrum, Waveform, Circular, Mirror, Particles)
+* [x] Live mode switching (no restart required)
 
 ### In development
 
@@ -161,6 +199,7 @@ Pulse is currently under active development.
 * [ ] UI refinement
 * [ ] Packaged Windows releases
 * [ ] Installation/distribution workflow
+* [ ] Additional visualizer modes
 
 ---
 
@@ -225,7 +264,9 @@ Pulse is inspired by the excellent **[fxsound-mac](https://github.com/okku007/fx
 
 `fxsound-mac` is a macOS-focused audio visualizer that served as the primary inspiration for the concept and visual direction of Pulse.
 
-Pulse is an independent **Windows implementation inspired by that project**, built from the ground up using C++ and JUCE with the goal of bringing a similar audio-visualization experience to Windows.
+The first version of Pulse — the native Windows/WASAPI port with the Spectrum visualizer, stereo goniometer, and level metering — was **[Jay](https://github.com/Jay19050)'s own build**, in C++ and JUCE, inspired by `fxsound-mac`'s concept and visual direction.
+
+**Multiple visualizer modes** (Filled Spectrum, Waveform, Circular, Mirror, and Particles), live mode switching, and the shared `VisualizerMode` architecture behind them were then added on top of that original Spectrum build, reusing the same audio pipeline without modifying it.
 
 ### Original Project
 
@@ -241,6 +282,8 @@ All credit for the original inspiration and concept goes to the original project
 **Jay19050**
 
 GitHub: https://github.com/Jay19050
+
+Built the original Windows/JUCE Spectrum visualizer, and added the multiple visualizer modes (Filled Spectrum, Waveform, Circular, Mirror, Particles) with live mode switching.
 
 ---
 
