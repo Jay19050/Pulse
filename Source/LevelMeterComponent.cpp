@@ -126,8 +126,7 @@ void LevelMeterComponent::paint(juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat();
 
-    g.setColour(juce::Colour(PulseTheme::WidgetBackground));
-    g.fillRoundedRectangle(bounds, 6.0f);
+    PulseTheme::panelBackground(g, bounds);
 
     auto area = bounds.reduced(10.0f);
 

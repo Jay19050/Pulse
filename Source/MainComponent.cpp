@@ -1,22 +1,30 @@
 #include "MainComponent.h"
 #include "PulseTheme.h"
 
+namespace
+{
+    constexpr int kHeaderHeight   = 56;
+    constexpr int kModeBarHeight  = 84;
+    constexpr int kStereoRowHeight = 140;
+    constexpr int kSettingsWidth  = 300;
+    constexpr int kGap = 12;
+}
+
 MainComponent::MainComponent()
 {
-    setSize(1100, 680);
+    setSize(1180, 720);
 
-    status.setText("PULSE  |  starting audio capture...", juce::dontSendNotification);
-    status.setColour(juce::Label::textColourId, juce::Colour(PulseTheme::DefaultText));
-    status.setFont(juce::Font(13.0f));
-    status.setJustificationType(juce::Justification::centredLeft);
-    addAndMakeVisible(status);
+    header.setDeviceInfo("starting audio capture...");
+    header.onSettingsClicked = [this] { setSettingsPanelOpen(! settingsOpen); };
+
+    settingsPanel.onCloseClicked = [this] { setSettingsPanelOpen(false); };
 
     visualizer.onResetPeaks = [this] { analyzer.resetPeakHold(); };
 
     audio.setBlockCallback([this](const float* const* channels,
                                    int numChannels,
                                    int numSamples,
-                                   double sampleRate)
+                                   double /*sampleRate*/)
     {
         if (numChannels <= 0 || channels == nullptr || channels[0] == nullptr)
             return;
@@ -32,9 +40,13 @@ MainComponent::MainComponent()
         levelMeter.pushStereo(left, right, numSamples);
     });
 
+    addAndMakeVisible(header);
     addAndMakeVisible(visualizer);
     addAndMakeVisible(goniometer);
     addAndMakeVisible(levelMeter);
+    addAndMakeVisible(modeSelector);
+    // Settings panel is added on demand in setSettingsPanelOpen() so it never
+    // eats mouse events over the visualizer while closed.
 
     startAudio();
     startTimerHz(30);
@@ -51,7 +63,7 @@ void MainComponent::startAudio()
     if (!audio.start())
     {
         audioActive.store(false);
-        status.setText("PULSE  |  " + audio.getLastError(), juce::dontSendNotification);
+        header.setDeviceInfo(audio.getLastError());
         return;
     }
 
@@ -59,9 +71,9 @@ void MainComponent::startAudio()
     visualizer.prepare(audio.getSampleRate());
     audioActive.store(true);
 
-    status.setText("PULSE  |  " + audio.getDeviceName()
-                 + "  |  " + juce::String(audio.getSampleRate(), 0) + " Hz",
-                   juce::dontSendNotification);
+    const juce::String deviceName = audio.getDeviceName();
+    header.setDeviceInfo(deviceName + "  |  " + juce::String(audio.getSampleRate(), 0) + " Hz");
+    settingsPanel.setAudioInfo(deviceName, audio.getSampleRate());
 }
 
 void MainComponent::stopAudio()
@@ -81,9 +93,12 @@ void MainComponent::timerCallback()
 
     goniometer.setActive(snapshot.active);
     levelMeter.setActive(snapshot.active);
+    header.setActive(snapshot.active);
 
-    if (!snapshot.active)
-        status.setText("PULSE  |  listening for audio...", juce::dontSendNotification);
+    if (!snapshot.active && audioActive.load())
+        header.setDeviceInfo("listening for audio...");
+    else if (snapshot.active && audioActive.load())
+        header.setDeviceInfo(audio.getDeviceName() + "  |  " + juce::String(audio.getSampleRate(), 0) + " Hz");
 
     repaint();
 }
@@ -93,24 +108,68 @@ void MainComponent::paint(juce::Graphics& g)
     g.fillAll(juce::Colour(PulseTheme::WindowBackground));
 }
 
+juce::Rectangle<int> MainComponent::settingsPanelBounds() const
+{
+    return { getWidth() - kSettingsWidth, kHeaderHeight, kSettingsWidth, getHeight() - kHeaderHeight };
+}
+
+void MainComponent::setSettingsPanelOpen(bool open)
+{
+    if (settingsOpen == open)
+        return;
+
+    settingsOpen = open;
+
+    auto& animator = juce::Desktop::getInstance().getAnimator();
+    const auto target = settingsPanelBounds();
+
+    if (open)
+    {
+        addAndMakeVisible(settingsPanel);
+        settingsPanel.setBounds(target.withX(getWidth()));
+        animator.animateComponent(&settingsPanel, target, 1.0f, 160, false, 3.0, 0.0);
+    }
+    else
+    {
+        animator.animateComponent(&settingsPanel, target.withX(getWidth()), 0.0f, 140, false, 3.0, 1.0);
+        // Removed from the hierarchy once the slide-out finishes, via a timer
+        // one-shot rather than a ComponentAnimator callback (kept simple -
+        // this is a rare, deliberate UI action, not a hot path). Guarded with
+        // a SafePointer in case MainComponent is destroyed mid-animation.
+        juce::Component::SafePointer<MainComponent> safeThis(this);
+        juce::Timer::callAfterDelay(150, [safeThis]
+        {
+            if (safeThis != nullptr && ! safeThis->settingsOpen)
+                safeThis->removeChildComponent(&safeThis->settingsPanel);
+        });
+    }
+}
+
 void MainComponent::resized()
 {
-    auto area = getLocalBounds().reduced(18);
+    auto area = getLocalBounds();
 
-    auto footer = area.removeFromBottom(28);
-    status.setBounds(footer);
+    header.setBounds(area.removeFromTop(kHeaderHeight));
 
-    auto main = area;
+    auto modeBarArea = area.removeFromBottom(kModeBarHeight);
+    modeBarArea.reduce(18, 0);
+    modeBarArea.removeFromBottom(14);
+    modeSelector.setBounds(modeBarArea);
 
-    // The large spectrum dominates; a fixed-height bottom strip holds the
-    // square goniometer on the left and the L/R level meter filling the rest.
-    auto bottomStrip = main.removeFromBottom(150);
-    main.removeFromBottom(12);
+    area = area.reduced(18, 0);
+    area.removeFromTop(14);
+    area.removeFromBottom(14);
 
-    auto gonArea = bottomStrip.removeFromLeft(150);
-    bottomStrip.removeFromLeft(12);
+    auto stereoRow = area.removeFromBottom(kStereoRowHeight);
+    area.removeFromBottom(kGap);
+
+    auto gonArea = stereoRow.removeFromLeft(kStereoRowHeight);
+    stereoRow.removeFromLeft(kGap);
     goniometer.setBounds(gonArea);
-    levelMeter.setBounds(bottomStrip);
+    levelMeter.setBounds(stereoRow);
 
-    visualizer.setBounds(main);
+    visualizer.setBounds(area);
+
+    if (settingsOpen)
+        settingsPanel.setBounds(settingsPanelBounds());
 }

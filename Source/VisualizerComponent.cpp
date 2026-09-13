@@ -11,7 +11,6 @@ namespace
     const juce::Colour kPeakHoldColour { PulseTheme::PeakHold };
     const juce::Colour kOutlineColour  { PulseTheme::Outline };
     const juce::Colour kTextColour     { PulseTheme::DefaultText };
-    const juce::Colour kPanelColour    { PulseTheme::WidgetBackground };
 
     // Log-spaced frequency gridlines - the values an engineer actually looks for.
     const float kGridFreqs[] = { 20.0f, 50.0f, 100.0f, 200.0f, 500.0f,
@@ -369,8 +368,7 @@ void VisualizerComponent::paint(juce::Graphics& g)
 {
     const auto plot = plotArea();
 
-    g.setColour(kPanelColour);
-    g.fillRoundedRectangle(getLocalBounds().toFloat(), 6.0f);
+    PulseTheme::panelBackground(g, getLocalBounds().toFloat());
 
     drawGrid(g, plot);
 

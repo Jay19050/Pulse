@@ -59,14 +59,8 @@ target_sources(Pulse
         Source/GoniometerComponent.cpp
         Source/LevelMeterComponent.h
         Source/LevelMeterComponent.cpp
-        Source/IconButton.h
-        Source/IconButton.cpp
-        Source/HeaderBar.h
-        Source/HeaderBar.cpp
-        Source/ModeSelectorBar.h
-        Source/ModeSelectorBar.cpp
-        Source/SettingsPanel.h
-        Source/SettingsPanel.cpp
+        Source/HeaderComponent.h
+        Source/HeaderComponent.cpp
 )
 
 target_compile_definitions(Pulse

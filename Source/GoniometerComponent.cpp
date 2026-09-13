@@ -80,8 +80,7 @@ void GoniometerComponent::paint(juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat();
 
-    g.setColour(juce::Colour(PulseTheme::WidgetBackground));
-    g.fillRoundedRectangle(bounds, 6.0f);
+    PulseTheme::panelBackground(g, bounds);
 
     // Nothing on this widget says what it is: an unlabelled dot cloud in a circle
     // is only readable if you already know it's a goniometer.

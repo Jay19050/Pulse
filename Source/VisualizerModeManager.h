@@ -6,16 +6,19 @@
 #include "VisualizerMode.h"
 
 // Owns one instance of every visualizer mode and shows exactly one at a time,
-// with a slim, custom-painted selector strip along the top (deliberately NOT
-// a native juce::ComboBox / Windows dropdown - it's a row of text labels in
-// Pulse's own dark/minimal language, consistent with VisualizerComponent's
-// legend panel elsewhere in the app).
+// filling its entire bounds.
+//
+// The mode-selector UI used to live inside this class (a text strip painted
+// along the top). It has since moved out to the standalone ModeSelectorBar,
+// so the main visualizer area is 100% visualization - the selector is now a
+// first-class sibling in MainComponent's layout instead of eating into this
+// component's bounds. This class kept its name and its "own every mode,
+// switch which is visible" responsibility; it just no longer draws UI chrome
+// itself.
 //
 // Every mode receives updateData() on every tick regardless of whether it's
 // currently visible, so switching modes shows current audio immediately
-// rather than a stale frame from whenever it was last active. This costs
-// six cheap array copies per tick (30 Hz) - negligible next to the FFT that
-// produced the snapshot in the first place.
+// rather than a stale frame from whenever it was last active.
 class VisualizerModeManager final : public juce::Component
 {
 public:
@@ -24,26 +27,25 @@ public:
     void prepare(double sampleRate);
     void updateData(const SpectrumAnalyzer::Snapshot& snapshot, const std::vector<float>& waveform);
 
+    int getNumModes() const { return (int) modes.size(); }
+    juce::String getModeName(int index) const;
+    int getActiveIndex() const { return activeIndex; }
+    void setActiveIndex(int index);
+
     void resized() override;
-    void paint(juce::Graphics&) override;
-    void mouseDown(const juce::MouseEvent&) override;
-    void mouseMove(const juce::MouseEvent&) override;
-    void mouseExit(const juce::MouseEvent&) override;
 
     // Forwarded from MainComponent so the Spectrum mode's "click to clear
     // peak hold" behaviour keeps working when it's the active mode.
     std::function<void()> onResetPeaks;
 
+    // Fired whenever setActiveIndex() actually changes the active mode, so
+    // ModeSelectorBar (or anything else showing the current mode) can repaint
+    // without polling.
+    std::function<void(int)> onActiveModeChanged;
+
 private:
-    void setActiveIndex(int index);
-    juce::Rectangle<float> selectorStripBounds() const;
-
     std::vector<std::unique_ptr<VisualizerMode>> modes;
-    std::vector<juce::Rectangle<float>> itemBounds; // recomputed in resized()
     int activeIndex = 0;
-    int hoverIndex = -1;
-
-    static constexpr float kStripHeight = 28.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VisualizerModeManager)
 };

@@ -7,6 +7,9 @@
 #include "WaveformBuffer.h"
 #include "GoniometerComponent.h"
 #include "LevelMeterComponent.h"
+#include "HeaderBar.h"
+#include "ModeSelectorBar.h"
+#include "SettingsPanel.h"
 
 class MainComponent final : public juce::Component, private juce::Timer
 {
@@ -21,6 +24,8 @@ private:
     void timerCallback() override;
     void startAudio();
     void stopAudio();
+    void setSettingsPanelOpen(bool open);
+    juce::Rectangle<int> settingsPanelBounds() const;
 
     AudioEngine audio;
     SpectrumAnalyzer analyzer;
@@ -29,7 +34,11 @@ private:
     GoniometerComponent goniometer;
     LevelMeterComponent levelMeter;
 
-    juce::Label status;
+    HeaderBar header;
+    ModeSelectorBar modeSelector { visualizer };
+    SettingsPanel settingsPanel;
+    bool settingsOpen = false;
+
     std::atomic<bool> audioActive { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)

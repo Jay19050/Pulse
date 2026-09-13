@@ -46,8 +46,7 @@ void ModeParticles::paint(juce::Graphics& g)
 {
     const auto bounds = getLocalBounds().toFloat();
 
-    g.setColour(juce::Colour(PulseTheme::WidgetBackground));
-    g.fillRoundedRectangle(bounds, 6.0f);
+    PulseTheme::panelBackground(g, bounds);
 
     const auto plot = bounds.reduced(14.0f);
     const juce::Colour accent(PulseTheme::Accent);
