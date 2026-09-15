@@ -29,9 +29,28 @@ The project is inspired by the visual style and experience of modern audio monit
   * **Waveform** — a real-time scrolling oscilloscope of the raw audio signal
   * **Circular** — a 360° radial spectrum with a peak-hold ring
   * **Mirror** — a symmetrical bar spectrum mirrored above/below a centerline
-  * **Particles** — an audio-reactive particle field tracing the spectrum shape
-* Compact, custom-painted mode-selector strip — switch modes live, no restart required
+  * **Particles** — a layered, flowing audio-reactive particle field: background dust, flowing ribbon streams, a level-driven central energy vortex, and high-frequency sparks — all deterministic functions of the real spectrum, not a random particle simulation
+* Compact mode-selector bar with icons — switch modes live, no restart required
 * Every mode goes idle/flat automatically when there's no audio — nothing is faked or randomly animated
+
+###  Output Device Selector
+
+* Lists available Windows render (output) devices via WASAPI enumeration
+* Switch which device Pulse listens to while running — no restart required
+* Refresh the device list on demand
+* Falls back to the system default if the selected device disconnects
+
+###  True Fullscreen
+
+* **F11** toggles genuine borderless fullscreen — no title bar, no window frame, no taskbar
+* **Esc** exits fullscreen
+* Restores the previous window size/position (and maximized state) on exit
+
+###  Visualizer Appearance Settings
+
+* Sensitivity, Smoothing, Brightness, Peak Intensity, and Background controls, applied live across all six modes
+* Custom-styled sliders matching Pulse's own visual language
+* Visual-only — never touches captured audio, system volume, or Windows audio settings
 
 ###  Level Metering
 
@@ -48,9 +67,9 @@ The project is inspired by the visual style and experience of modern audio monit
 
 ###  Interface
 
-* Dark audio-monitoring style interface
-* Custom Pulse visual theme
-* Dedicated visualization components
+* Dark, premium, custom Pulse visual theme — header, mode selector bar, and settings drawer all match
+* Header with logo, LIVE/IDLE audio-activity indicator, and current device readout
+* Slide-out settings drawer (device selector, fullscreen, visualizer appearance)
 * Designed around real-time visual feedback
 
 ---
@@ -126,6 +145,7 @@ Pulse/
 │   ├── SpectrumAnalyzer.cpp
 │   ├── SpectrumAnalyzer.h
 │   ├── VisualizerMode.h
+│   ├── VisualizerSettings.h
 │   ├── VisualizerComponent.cpp
 │   ├── VisualizerComponent.h
 │   ├── VisualizerModeManager.cpp
@@ -142,7 +162,19 @@ Pulse/
 │   ├── ModeMirror.cpp
 │   ├── ModeMirror.h
 │   ├── ModeParticles.cpp
-│   └── ModeParticles.h
+│   ├── ModeParticles.h
+│   ├── HeaderBar.cpp
+│   ├── HeaderBar.h
+│   ├── ModeSelectorBar.cpp
+│   ├── ModeSelectorBar.h
+│   ├── SettingsPanel.cpp
+│   ├── SettingsPanel.h
+│   ├── DeviceSelectorControl.cpp
+│   ├── DeviceSelectorControl.h
+│   ├── AppearanceSlider.cpp
+│   ├── AppearanceSlider.h
+│   ├── IconButton.cpp
+│   └── IconButton.h
 │
 ├── CMakeLists.txt
 ├── .gitignore
@@ -154,19 +186,26 @@ Pulse/
 
 | Component               | Purpose                                           |
 | ------------------------ | -------------------------------------------------- |
-| `AudioEngine`            | Audio device and audio processing                  |
+| `AudioEngine`            | WASAPI loopback capture, output-device enumeration/selection |
 | `SpectrumAnalyzer`       | FFT and frequency analysis (shared by every mode)  |
 | `VisualizerMode`         | Common interface implemented by every visualizer mode |
-| `VisualizerModeManager`  | Owns all modes, handles switching + selector strip |
+| `VisualizerSettings`     | Shared visual-only appearance parameters (sensitivity, smoothing, brightness, peak intensity, background) |
+| `VisualizerModeManager`  | Owns all modes, handles switching                  |
 | `VisualizerComponent`    | Spectrum mode (LIVE / AVG / PEAK HOLD + legend)    |
 | `ModeFilledSpectrum`     | Filled Spectrum mode                               |
 | `ModeWaveform`           | Waveform (oscilloscope) mode                       |
 | `ModeCircular`           | Circular spectrum mode                             |
 | `ModeMirror`             | Mirror spectrum mode                               |
-| `ModeParticles`          | Particles mode                                     |
+| `ModeParticles`          | Layered flowing particle-field mode                |
 | `WaveformBuffer`         | Rolling raw-sample buffer feeding Waveform mode     |
 | `GoniometerComponent`    | Stereo field visualization                         |
 | `LevelMeterComponent`    | Audio level visualization                          |
+| `HeaderBar`              | Logo, LIVE/IDLE indicator, device readout, settings button |
+| `ModeSelectorBar`        | Bottom mode-selector bar                           |
+| `SettingsPanel`          | Slide-out drawer: device selector, fullscreen, appearance sliders |
+| `DeviceSelectorControl`  | Custom output-device dropdown                      |
+| `AppearanceSlider`       | Custom-styled slider used in the settings drawer   |
+| `IconButton`             | Shared gear/close icon button                      |
 | `PulseTheme`             | Application visual styling                         |
 | `MainComponent`          | Main application interface                         |
 
@@ -186,9 +225,13 @@ Pulse is currently under active development.
 * [x] Spectrum visualization
 * [x] Stereo goniometer
 * [x] Level metering
-* [x] Custom dark UI
+* [x] Custom dark UI (header, mode selector bar, settings drawer)
 * [x] Multiple visualizer modes (Spectrum, Filled Spectrum, Waveform, Circular, Mirror, Particles)
 * [x] Live mode switching (no restart required)
+* [x] Output device selection, switching, and disconnect fallback
+* [x] True borderless fullscreen (F11 / Esc)
+* [x] Visualizer appearance settings (Sensitivity, Smoothing, Brightness, Peak Intensity, Background)
+* [x] Layered, flowing Particles mode
 
 ### In development
 
@@ -196,10 +239,10 @@ Pulse is currently under active development.
 * [ ] Lower-latency visualization
 * [ ] Improved stereo visualization behavior
 * [ ] Improved audio-device compatibility
-* [ ] UI refinement
+* [ ] Performance settings (FPS limit, render quality)
+* [ ] Preference persistence across launches
 * [ ] Packaged Windows releases
 * [ ] Installation/distribution workflow
-* [ ] Additional visualizer modes
 
 ---
 
@@ -283,7 +326,7 @@ All credit for the original inspiration and concept goes to the original project
 
 GitHub: https://github.com/Jay19050
 
-Built the original Windows/JUCE Spectrum visualizer, and added the multiple visualizer modes (Filled Spectrum, Waveform, Circular, Mirror, Particles) with live mode switching.
+Built the original Windows/JUCE Spectrum visualizer, and added the multiple visualizer modes, output device selection, true fullscreen, and the visualizer appearance settings system.
 
 ---
 
