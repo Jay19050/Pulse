@@ -39,6 +39,11 @@ public:
     {
         setSnapshot(snapshot); // this mode doesn't use the raw waveform
     }
+    void setAppearance(const VisualizerSettings& newAppearance) override
+    {
+        VisualizerMode::setAppearance(newAppearance);
+        recomputeScaled(); // apply immediately, don't wait for the next snapshot
+    }
     juce::String getModeName() const override { return "Spectrum"; }
 
     void paint(juce::Graphics&) override;
@@ -52,6 +57,8 @@ public:
 
 private:
     void timerCallback() override;
+
+    void recomputeScaled();
 
     juce::Rectangle<float> plotArea() const;
 
@@ -78,6 +85,15 @@ private:
     void drawLegendForeground(juce::Graphics& g) const;
 
     SpectrumAnalyzer::Snapshot snapshot;
+
+    // Sensitivity-scaled copies of fast/slow/peak, recomputed in setSnapshot().
+    // Both the curves AND the hover readout (dot position + dB text) read from
+    // these, not the raw snapshot, so the readout always matches what's drawn -
+    // Sensitivity is a visual-appearance control, but decoupling the on-screen
+    // dot from the printed number would look like a bug.
+    std::array<float, SpectrumAnalyzer::spectrumPoints> scaledFast {};
+    std::array<float, SpectrumAnalyzer::spectrumPoints> scaledSlow {};
+    std::array<float, SpectrumAnalyzer::spectrumPoints> scaledPeak {};
 
     std::array<bool, kNumTraces> traceVisible { true, true, true };
     bool legendCollapsed = false;

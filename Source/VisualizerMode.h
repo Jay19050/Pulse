@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include <vector>
 #include "SpectrumAnalyzer.h"
+#include "VisualizerSettings.h"
 
 // Common interface for every visualizer rendering mode (Spectrum, Filled
 // Spectrum, Waveform, Circular, Mirror, Particles). VisualizerModeManager owns
@@ -29,6 +30,15 @@ public:
     virtual void updateData(const SpectrumAnalyzer::Snapshot& snapshot,
                              const std::vector<float>& waveform) = 0;
 
+    // Visual-only rendering parameters (sensitivity/smoothing/brightness/
+    // peak intensity/background), set from the Settings panel. Stored once
+    // here rather than duplicated per mode; subclasses read `appearance.*`
+    // directly in paint()/updateData(). Never affects captured audio.
+    virtual void setAppearance(const VisualizerSettings& newAppearance) { appearance = newAppearance; }
+
     // Short label shown in the mode-selector strip, e.g. "Spectrum".
     virtual juce::String getModeName() const = 0;
+
+protected:
+    VisualizerSettings appearance;
 };

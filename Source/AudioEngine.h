@@ -12,6 +12,13 @@ class AudioEngine final
 public:
     using BlockCallback = std::function<void(const float* const*, int, int, double)>;
 
+    struct DeviceInfo
+    {
+        juce::String id;    // WASAPI endpoint ID - stable, used to reopen this exact device
+        juce::String name;  // human-readable friendly name, for display only
+        bool isDefault = false;
+    };
+
     AudioEngine();
     ~AudioEngine();
 
@@ -23,6 +30,18 @@ public:
     int getNumInputChannels() const noexcept { return numInputChannels.load(); }
     juce::String getDeviceName() const;
     juce::String getLastError() const;
+
+    // Windows render/output devices Pulse can loopback-capture from. Static
+    // and self-contained (own COM lifetime) so it can be called from the UI
+    // thread without an AudioEngine instance - e.g. before the first start().
+    static std::vector<DeviceInfo> enumerateOutputDevices();
+
+    // Which endpoint to open on the next start()/restart. Empty string means
+    // "the current Windows default render device". Does not itself restart
+    // capture - callers (MainComponent) call stop()+start() (or just start(),
+    // which already stops first) to apply it.
+    void setOutputDeviceId(const juce::String& id);
+    juce::String getOutputDeviceId() const;
 
     void setBlockCallback(BlockCallback callback);
 
@@ -41,6 +60,7 @@ private:
 
     juce::String deviceName;
     juce::String lastError;
+    juce::String requestedDeviceId; // "" = system default; guarded by callbackLock
     mutable juce::CriticalSection callbackLock;
     BlockCallback blockCallback;
 

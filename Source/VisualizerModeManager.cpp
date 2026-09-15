@@ -46,6 +46,13 @@ void VisualizerModeManager::updateData(const SpectrumAnalyzer::Snapshot& snapsho
         m->updateData(snapshot, waveform);
 }
 
+void VisualizerModeManager::setAppearance(const VisualizerSettings& newAppearance)
+{
+    for (auto& m : modes)
+        m->setAppearance(newAppearance);
+    repaint();
+}
+
 juce::String VisualizerModeManager::getModeName(int index) const
 {
     if (index < 0 || index >= (int) modes.size())

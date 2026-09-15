@@ -76,6 +76,17 @@ VisualizerComponent::VisualizerComponent()
 void VisualizerComponent::setSnapshot(const SpectrumAnalyzer::Snapshot& newSnapshot)
 {
     snapshot = newSnapshot;
+    recomputeScaled();
+}
+
+void VisualizerComponent::recomputeScaled()
+{
+    for (size_t i = 0; i < scaledFast.size(); ++i)
+    {
+        scaledFast[i] = juce::jlimit(0.0f, 1.0f, snapshot.fast[i] * appearance.sensitivity);
+        scaledSlow[i] = juce::jlimit(0.0f, 1.0f, snapshot.slow[i] * appearance.sensitivity);
+        scaledPeak[i] = juce::jlimit(0.0f, 1.0f, snapshot.peak[i] * appearance.sensitivity);
+    }
 }
 
 void VisualizerComponent::timerCallback()
@@ -367,8 +378,11 @@ void VisualizerComponent::drawLegendForeground(juce::Graphics& g) const
 void VisualizerComponent::paint(juce::Graphics& g)
 {
     const auto plot = plotArea();
+    const float brightness = juce::jlimit(0.3f, 1.0f, appearance.brightness);
+    const float peakAlpha = juce::jlimit(0.0f, 1.0f, appearance.peakIntensity * 0.75f);
 
-    PulseTheme::panelBackground(g, getLocalBounds().toFloat());
+    PulseTheme::panelBackground(g, getLocalBounds().toFloat(), 6.0f,
+                                 PulseTheme::backgroundColourFor(appearance.background));
 
     drawGrid(g, plot);
 
@@ -377,19 +391,19 @@ void VisualizerComponent::paint(juce::Graphics& g)
     // LIVE: filled, in the accent colour. This is what's happening right now.
     if (traceVisible[(size_t) TraceLive])
     {
-        const juce::Path liveStroke = buildCurve(snapshot.fast, plot);
+        const juce::Path liveStroke = buildCurve(scaledFast, plot);
 
         juce::Path liveFilled = liveStroke;
         liveFilled.lineTo(plot.getRight(), plot.getBottom());
         liveFilled.lineTo(plot.getX(),     plot.getBottom());
         liveFilled.closeSubPath();
 
-        g.setGradientFill(juce::ColourGradient(kAccentColour.withAlpha(0.55f), plot.getX(), plot.getY(),
-                                               kAccentColour.withAlpha(0.05f), plot.getX(), plot.getBottom(),
+        g.setGradientFill(juce::ColourGradient(kAccentColour.withAlpha(0.55f * brightness), plot.getX(), plot.getY(),
+                                               kAccentColour.withAlpha(0.05f * brightness), plot.getX(), plot.getBottom(),
                                                false));
         g.fillPath(liveFilled);
 
-        g.setColour(kAccentColour.withAlpha(snapshot.active ? 0.95f : 0.4f));
+        g.setColour(kAccentColour.withAlpha((snapshot.active ? 0.95f : 0.4f) * brightness));
         g.strokePath(liveStroke, juce::PathStrokeType(1.6f));
     }
 
@@ -397,15 +411,15 @@ void VisualizerComponent::paint(juce::Graphics& g)
     // not another curve competing with it.
     if (traceVisible[(size_t) TracePeakHold])
     {
-        g.setColour(kPeakHoldColour.withAlpha(0.75f));
-        g.strokePath(buildCurve(snapshot.peak, plot), juce::PathStrokeType(1.0f));
+        g.setColour(kPeakHoldColour.withAlpha(peakAlpha));
+        g.strokePath(buildCurve(scaledPeak, plot), juce::PathStrokeType(1.0f));
     }
 
     // AVG: unfilled ghost, drawn last so it stays readable on top of the fill.
     if (traceVisible[(size_t) TraceAverage])
     {
-        g.setColour(juce::Colours::white.withAlpha(0.85f));
-        g.strokePath(buildCurve(snapshot.slow, plot), juce::PathStrokeType(1.6f));
+        g.setColour(juce::Colours::white.withAlpha(0.85f * brightness));
+        g.strokePath(buildCurve(scaledSlow, plot), juce::PathStrokeType(1.6f));
     }
 
     // Foreground last: the legend and hover readout ride on top of every trace.
@@ -433,22 +447,22 @@ void VisualizerComponent::drawHoverReadout(juce::Graphics& g, juce::Rectangle<fl
     if (traceVisible[(size_t) TraceLive])
     {
         g.setColour(kAccentColour);
-        g.fillEllipse(x - 2.5f, yForValue(snapshot.fast[idx], plot) - 2.5f, 5.0f, 5.0f);
-        rows.push_back({ kAccentColour, "LIVE " + juce::String(approxDb(snapshot.fast[idx]), 1) + " dB" });
+        g.fillEllipse(x - 2.5f, yForValue(scaledFast[idx], plot) - 2.5f, 5.0f, 5.0f);
+        rows.push_back({ kAccentColour, "LIVE " + juce::String(approxDb(scaledFast[idx]), 1) + " dB" });
     }
 
     if (traceVisible[(size_t) TraceAverage])
     {
         g.setColour(juce::Colours::white.withAlpha(0.9f));
-        g.fillEllipse(x - 2.5f, yForValue(snapshot.slow[idx], plot) - 2.5f, 5.0f, 5.0f);
-        rows.push_back({ juce::Colours::white, "AVG  " + juce::String(approxDb(snapshot.slow[idx]), 1) + " dB" });
+        g.fillEllipse(x - 2.5f, yForValue(scaledSlow[idx], plot) - 2.5f, 5.0f, 5.0f);
+        rows.push_back({ juce::Colours::white, "AVG  " + juce::String(approxDb(scaledSlow[idx]), 1) + " dB" });
     }
 
     if (traceVisible[(size_t) TracePeakHold])
     {
         g.setColour(kPeakHoldColour);
-        g.fillEllipse(x - 2.5f, yForValue(snapshot.peak[idx], plot) - 2.5f, 5.0f, 5.0f);
-        rows.push_back({ kPeakHoldColour, "PEAK " + juce::String(approxDb(snapshot.peak[idx]), 1) + " dB" });
+        g.fillEllipse(x - 2.5f, yForValue(scaledPeak[idx], plot) - 2.5f, 5.0f, 5.0f);
+        rows.push_back({ kPeakHoldColour, "PEAK " + juce::String(approxDb(scaledPeak[idx]), 1) + " dB" });
     }
 
     // Row 0 is just the frequency, which belongs to the cursor rather than any

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include "VisualizerMode.h"
 
 // A single smooth filled curve of the live spectrum - no legend, no
@@ -17,6 +18,8 @@ public:
 
 private:
     SpectrumAnalyzer::Snapshot snapshot;
+    std::array<EnvelopeFollower, SpectrumAnalyzer::spectrumPoints> followers;
+    std::array<float, SpectrumAnalyzer::spectrumPoints> displayed {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ModeFilledSpectrum)
 };

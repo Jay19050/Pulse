@@ -16,6 +16,7 @@ public:
 
 private:
     std::vector<float> samples;
+    std::vector<EnvelopeFollower> hiFollowers, loFollowers;
     bool active = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ModeWaveform)

@@ -119,10 +119,35 @@ bool AudioEngine::initialiseLoopback(void*& outAudioClient,
         goto fail;
     }
 
-    hr = enumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &endpoint);
-    if (FAILED(hr))
     {
-        lastError = "Could not find the default Windows output device";
+        juce::String wantedId;
+        {
+            const juce::ScopedLock idLock(callbackLock);
+            wantedId = requestedDeviceId;
+        }
+
+        if (wantedId.isNotEmpty())
+        {
+            hr = enumerator->GetDevice(wantedId.toWideCharPointer(), &endpoint);
+            if (FAILED(hr))
+            {
+                // The previously-selected device is gone (unplugged, disabled,
+                // etc). Fall back to the current Windows default rather than
+                // failing outright, and forget the stale id so a later restart
+                // doesn't keep retrying a device that no longer exists.
+                endpoint = nullptr;
+                const juce::ScopedLock idLock(callbackLock);
+                requestedDeviceId.clear();
+            }
+        }
+    } // wantedId goes out of scope here, before any goto below can skip it
+
+    if (endpoint == nullptr)
+        hr = enumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &endpoint);
+
+    if (FAILED(hr) || endpoint == nullptr)
+    {
+        lastError = "Could not find the requested Windows output device";
         goto fail;
     }
 
@@ -328,8 +353,20 @@ void AudioEngine::captureThreadMain()
             continue;
 
         UINT32 packetLength = 0;
-        if (FAILED(capture->GetNextPacketSize(&packetLength)))
+        HRESULT packetHr = capture->GetNextPacketSize(&packetLength);
+        if (FAILED(packetHr))
+        {
+            // AUDCLNT_E_DEVICE_INVALIDATED means the endpoint disappeared
+            // (unplugged, disabled, format changed) - not a normal shutdown.
+            // Record why and mark the engine stopped so isRunning()/
+            // getLastError() reflect reality; MainComponent's watchdog can
+            // then decide whether/when to retry.
+            lastError = (packetHr == AUDCLNT_E_DEVICE_INVALIDATED)
+                      ? "Output device disconnected"
+                      : "WASAPI capture error";
+            running.store(false);
             break;
+        }
 
         while (packetLength > 0 && running.load())
         {
@@ -342,7 +379,13 @@ void AudioEngine::captureThreadMain()
             hr = capture->GetBuffer(&data, &frames, &flags,
                                     &devicePosition, &qpcPosition);
             if (FAILED(hr))
+            {
+                lastError = (hr == AUDCLNT_E_DEVICE_INVALIDATED)
+                          ? "Output device disconnected"
+                          : "WASAPI capture error";
+                running.store(false);
                 break;
+            }
 
             processPacket(data, frames, flags);
             capture->ReleaseBuffer(frames);
@@ -473,4 +516,98 @@ void AudioEngine::setBlockCallback(BlockCallback callback)
 {
     const juce::ScopedLock lock(callbackLock);
     blockCallback = std::move(callback);
+}
+
+void AudioEngine::setOutputDeviceId(const juce::String& id)
+{
+    const juce::ScopedLock lock(callbackLock);
+    requestedDeviceId = id;
+}
+
+juce::String AudioEngine::getOutputDeviceId() const
+{
+    const juce::ScopedLock lock(callbackLock);
+    return requestedDeviceId;
+}
+
+std::vector<AudioEngine::DeviceInfo> AudioEngine::enumerateOutputDevices()
+{
+    std::vector<DeviceInfo> result;
+
+    // Self-contained COM lifetime: this can be called from the UI thread,
+    // independently of the capture thread's own CoInitializeEx.
+    const HRESULT comHr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const bool needsUninit = SUCCEEDED(comHr); // true for S_OK or S_FALSE
+
+    IMMDeviceEnumerator* enumerator = nullptr;
+    IMMDeviceCollection* collection = nullptr;
+    IMMDevice* defaultDevice = nullptr;
+    juce::String defaultId;
+
+    if (SUCCEEDED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr,
+                                   CLSCTX_ALL, IID_PPV_ARGS(&enumerator))))
+    {
+        if (SUCCEEDED(enumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &defaultDevice)))
+        {
+            LPWSTR id = nullptr;
+            if (SUCCEEDED(defaultDevice->GetId(&id)) && id != nullptr)
+            {
+                defaultId = juce::String(id);
+                CoTaskMemFree(id);
+            }
+            safeRelease(defaultDevice);
+        }
+
+        if (SUCCEEDED(enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &collection)))
+        {
+            UINT count = 0;
+            collection->GetCount(&count);
+
+            for (UINT i = 0; i < count; ++i)
+            {
+                IMMDevice* device = nullptr;
+                if (FAILED(collection->Item(i, &device)) || device == nullptr)
+                    continue;
+
+                DeviceInfo info;
+
+                LPWSTR id = nullptr;
+                if (SUCCEEDED(device->GetId(&id)) && id != nullptr)
+                {
+                    info.id = juce::String(id);
+                    CoTaskMemFree(id);
+                }
+
+                IPropertyStore* properties = nullptr;
+                if (SUCCEEDED(device->OpenPropertyStore(STGM_READ, &properties)))
+                {
+                    PROPVARIANT value;
+                    PropVariantInit(&value);
+                    if (SUCCEEDED(properties->GetValue(PKEY_Device_FriendlyName, &value))
+                        && value.vt == VT_LPWSTR && value.pwszVal != nullptr)
+                    {
+                        info.name = juce::String(value.pwszVal);
+                    }
+                    PropVariantClear(&value);
+                    safeRelease(properties);
+                }
+
+                if (info.name.isEmpty())
+                    info.name = "Unknown device";
+
+                info.isDefault = info.id.isNotEmpty() && info.id == defaultId;
+
+                result.push_back(info);
+                safeRelease(device);
+            }
+        }
+
+        safeRelease(collection);
+        safeRelease(enumerator);
+    }
+
+    if (needsUninit)
+        CoUninitialize();
+
+    return result;
 }

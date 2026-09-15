@@ -10,13 +10,19 @@ ModeFilledSpectrum::ModeFilledSpectrum()
 void ModeFilledSpectrum::updateData(const SpectrumAnalyzer::Snapshot& newSnapshot, const std::vector<float>&)
 {
     snapshot = newSnapshot;
+
+    for (size_t i = 0; i < displayed.size(); ++i)
+    {
+        const float target = juce::jlimit(0.0f, 1.0f, snapshot.fast[i] * appearance.sensitivity);
+        displayed[i] = followers[i].advance(target, appearance.smoothing);
+    }
 }
 
 void ModeFilledSpectrum::paint(juce::Graphics& g)
 {
     const auto bounds = getLocalBounds().toFloat();
 
-    PulseTheme::panelBackground(g, bounds);
+    PulseTheme::panelBackground(g, bounds, 6.0f, PulseTheme::backgroundColourFor(appearance.background));
 
     const auto plot = bounds.reduced(14.0f);
 
@@ -32,7 +38,7 @@ void ModeFilledSpectrum::paint(juce::Graphics& g)
         return CurveUtils::cartesianMap(index, value, b);
     };
 
-    const auto stroke = CurveUtils::buildSmoothCurve(snapshot.fast, plot, mapPoint);
+    const auto stroke = CurveUtils::buildSmoothCurve(displayed, plot, mapPoint);
 
     juce::Path filled = stroke;
     filled.lineTo(plot.getRight(), plot.getBottom());
@@ -40,12 +46,13 @@ void ModeFilledSpectrum::paint(juce::Graphics& g)
     filled.closeSubPath();
 
     const juce::Colour accent(PulseTheme::Accent);
+    const float b = juce::jlimit(0.3f, 1.0f, appearance.brightness);
 
-    g.setGradientFill(juce::ColourGradient(accent.withAlpha(0.85f), plot.getX(), plot.getY(),
-                                            accent.withAlpha(0.08f), plot.getX(), plot.getBottom(),
+    g.setGradientFill(juce::ColourGradient(accent.withAlpha(0.85f * b), plot.getX(), plot.getY(),
+                                            accent.withAlpha(0.08f * b), plot.getX(), plot.getBottom(),
                                             false));
     g.fillPath(filled);
 
-    g.setColour(accent.withAlpha(snapshot.active ? 1.0f : 0.4f));
+    g.setColour(accent.withAlpha((snapshot.active ? 1.0f : 0.4f) * juce::jlimit(0.3f, 1.0f, appearance.peakIntensity)));
     g.strokePath(stroke, juce::PathStrokeType(2.0f));
 }

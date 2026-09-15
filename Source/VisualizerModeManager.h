@@ -26,6 +26,7 @@ public:
 
     void prepare(double sampleRate);
     void updateData(const SpectrumAnalyzer::Snapshot& snapshot, const std::vector<float>& waveform);
+    void setAppearance(const VisualizerSettings& newAppearance);
 
     int getNumModes() const { return (int) modes.size(); }
     juce::String getModeName(int index) const;

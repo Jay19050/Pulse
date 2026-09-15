@@ -3,21 +3,30 @@
 
 namespace
 {
-    constexpr int kHeaderHeight   = 56;
-    constexpr int kModeBarHeight  = 84;
+    constexpr int kHeaderHeight    = 56;
+    constexpr int kModeBarHeight   = 84;
     constexpr int kStereoRowHeight = 140;
-    constexpr int kSettingsWidth  = 300;
+    constexpr int kSettingsWidth   = 300;
     constexpr int kGap = 12;
 }
 
 MainComponent::MainComponent()
 {
     setSize(1180, 720);
+    setWantsKeyboardFocus(true);
 
     header.setDeviceInfo("starting audio capture...");
     header.onSettingsClicked = [this] { setSettingsPanelOpen(! settingsOpen); };
 
     settingsPanel.onCloseClicked = [this] { setSettingsPanelOpen(false); };
+    settingsPanel.onDeviceSelected = [this](juce::String id) { switchOutputDevice(id); };
+    settingsPanel.onRefreshDevicesRequested = [this] { refreshDeviceList(); };
+    settingsPanel.onToggleFullscreenClicked = [this]
+    {
+        if (onToggleFullscreenRequested != nullptr)
+            onToggleFullscreenRequested();
+    };
+    settingsPanel.onAppearanceChanged = [this](VisualizerSettings s) { visualizer.setAppearance(s); };
 
     visualizer.onResetPeaks = [this] { analyzer.resetPeakHold(); };
 
@@ -49,6 +58,7 @@ MainComponent::MainComponent()
     // eats mouse events over the visualizer while closed.
 
     startAudio();
+    refreshDeviceList();
     startTimerHz(30);
 }
 
@@ -73,7 +83,8 @@ void MainComponent::startAudio()
 
     const juce::String deviceName = audio.getDeviceName();
     header.setDeviceInfo(deviceName + "  |  " + juce::String(audio.getSampleRate(), 0) + " Hz");
-    settingsPanel.setAudioInfo(deviceName, audio.getSampleRate());
+    settingsPanel.setSampleRate(audio.getSampleRate());
+    settingsPanel.setSelectedDevice(audio.getOutputDeviceId());
 }
 
 void MainComponent::stopAudio()
@@ -82,8 +93,49 @@ void MainComponent::stopAudio()
     audioActive.store(false);
 }
 
+void MainComponent::refreshDeviceList()
+{
+    // Enumeration is COM-bound and typically takes a few ms for a handful of
+    // devices - acceptable to do synchronously on the UI thread for a
+    // deliberate, infrequent action (startup, or the user clicking Refresh),
+    // per the "don't poll devices continuously" requirement.
+    auto devices = AudioEngine::enumerateOutputDevices();
+    settingsPanel.setDevices(devices, audio.getOutputDeviceId());
+}
+
+void MainComponent::switchOutputDevice(const juce::String& id)
+{
+    if (id == audio.getOutputDeviceId())
+        return;
+
+    audio.setOutputDeviceId(id);
+    startAudio(); // start() already stops any existing capture first
+}
+
 void MainComponent::timerCallback()
 {
+    // Reconnect watchdog: the capture thread sets running=false on a genuine
+    // WASAPI failure (see AudioEngine::captureThreadMain), most commonly the
+    // selected device disappearing. Retry at a throttled interval instead of
+    // spamming WASAPI every tick. AudioEngine::initialiseLoopback already
+    // falls back to the system default if the previously-requested device is
+    // gone, so this naturally recovers onto whatever's available.
+    if (audioActive.load() && ! audio.isRunning())
+    {
+        if (reconnectCooldownTicks > 0)
+        {
+            --reconnectCooldownTicks;
+        }
+        else
+        {
+            reconnectCooldownTicks = kReconnectIntervalTicks;
+            startAudio();
+        }
+
+        if (! audio.isRunning())
+            header.setDeviceInfo("device disconnected - retrying...");
+    }
+
     auto snapshot = analyzer.getSnapshot();
 
     // ~50ms window - enough to read as a real waveform, short enough that
@@ -95,10 +147,13 @@ void MainComponent::timerCallback()
     levelMeter.setActive(snapshot.active);
     header.setActive(snapshot.active);
 
-    if (!snapshot.active && audioActive.load())
-        header.setDeviceInfo("listening for audio...");
-    else if (snapshot.active && audioActive.load())
-        header.setDeviceInfo(audio.getDeviceName() + "  |  " + juce::String(audio.getSampleRate(), 0) + " Hz");
+    if (audio.isRunning())
+    {
+        if (!snapshot.active)
+            header.setDeviceInfo("listening for audio...");
+        else
+            header.setDeviceInfo(audio.getDeviceName() + "  |  " + juce::String(audio.getSampleRate(), 0) + " Hz");
+    }
 
     repaint();
 }
@@ -106,6 +161,25 @@ void MainComponent::timerCallback()
 void MainComponent::paint(juce::Graphics& g)
 {
     g.fillAll(juce::Colour(PulseTheme::WindowBackground));
+}
+
+bool MainComponent::keyPressed(const juce::KeyPress& key)
+{
+    if (key == juce::KeyPress::F11Key)
+    {
+        if (onToggleFullscreenRequested != nullptr)
+            onToggleFullscreenRequested();
+        return true;
+    }
+
+    if (key == juce::KeyPress::escapeKey)
+    {
+        if (onExitFullscreenRequested != nullptr)
+            onExitFullscreenRequested();
+        return true;
+    }
+
+    return false;
 }
 
 juce::Rectangle<int> MainComponent::settingsPanelBounds() const

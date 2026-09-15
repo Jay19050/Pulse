@@ -38,6 +38,7 @@ target_sources(Pulse
         Source/SpectrumAnalyzer.cpp
         Source/PulseTheme.h
         Source/VisualizerMode.h
+        Source/VisualizerSettings.h
         Source/CurveUtils.h
         Source/VisualizerComponent.h
         Source/VisualizerComponent.cpp
@@ -67,6 +68,10 @@ target_sources(Pulse
         Source/ModeSelectorBar.cpp
         Source/SettingsPanel.h
         Source/SettingsPanel.cpp
+        Source/DeviceSelectorControl.h
+        Source/DeviceSelectorControl.cpp
+        Source/AppearanceSlider.h
+        Source/AppearanceSlider.cpp
 )
 
 target_compile_definitions(Pulse

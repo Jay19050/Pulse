@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include "VisualizerMode.h"
 
 // A symmetrical spectrum: the live trace drawn as bars radiating both up and
@@ -16,6 +17,8 @@ public:
 
 private:
     SpectrumAnalyzer::Snapshot snapshot;
+    std::array<EnvelopeFollower, SpectrumAnalyzer::spectrumPoints> followers;
+    std::array<float, SpectrumAnalyzer::spectrumPoints> displayed {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ModeMirror)
 };

@@ -47,12 +47,29 @@ namespace PulseTheme
     // drawer) so they read as one consistent design system rather than six
     // separately-tuned rectangles.
     inline void panelBackground(juce::Graphics& g, juce::Rectangle<float> bounds,
-                                 float cornerRadius = 6.0f, juce::uint32 fill = WidgetBackground)
+                                 float cornerRadius, juce::Colour fill)
     {
-        g.setColour(juce::Colour(fill));
+        g.setColour(fill);
         g.fillRoundedRectangle(bounds, cornerRadius);
 
         g.setColour(juce::Colour(Outline).withAlpha(0.6f));
         g.drawRoundedRectangle(bounds.reduced(0.5f), cornerRadius, 1.0f);
+    }
+
+    inline void panelBackground(juce::Graphics& g, juce::Rectangle<float> bounds,
+                                 float cornerRadius = 6.0f, juce::uint32 fill = WidgetBackground)
+    {
+        panelBackground(g, bounds, cornerRadius, juce::Colour(fill));
+    }
+
+    // Maps the Settings panel's "Background" slider (0..1, default 0.5) to an
+    // actual fill colour. Deliberately narrow (0.7x-1.3x brightness around
+    // the default WidgetBackground) so the UI can never be dragged into
+    // unreadable territory, per the appearance brief's "keep the range
+    // tasteful" requirement.
+    inline juce::Colour backgroundColourFor(float amount)
+    {
+        const float t = juce::jlimit(0.0f, 1.0f, amount);
+        return juce::Colour(WidgetBackground).withMultipliedBrightness(juce::jmap(t, 0.0f, 1.0f, 0.7f, 1.3f));
     }
 }
