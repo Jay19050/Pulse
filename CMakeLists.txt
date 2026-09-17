@@ -30,6 +30,7 @@ juce_generate_juce_header(Pulse)
 target_sources(Pulse
     PRIVATE
         Source/Main.cpp
+	Source/Pulse.rc
         Source/MainComponent.h
         Source/MainComponent.cpp
         Source/AudioEngine.h
