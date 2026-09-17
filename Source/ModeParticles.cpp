@@ -1,5 +1,6 @@
 #include "ModeParticles.h"
 #include "PulseTheme.h"
+#include "BandEnergy.h"
 #include <cmath>
 
 namespace
@@ -62,31 +63,16 @@ void ModeParticles::updateData(const SpectrumAnalyzer::Snapshot& newSnapshot, co
 {
     snapshot = newSnapshot;
 
-    // Bass/mid/high bands, in index-space of the existing log-frequency
-    // mapping (SpectrumAnalyzer already distributes its 512 points
-    // perceptually across the audible range, so "first ~8%" is sub-bass/
-    // bass, "15-55%" is midrange, "top ~18%" is high treble - matching the
-    // log mapping every other mode already relies on).
-    constexpr int n = SpectrumAnalyzer::spectrumPoints;
-    constexpr int bassEnd   = n * 8  / 100;
-    constexpr int midStart  = n * 15 / 100;
-    constexpr int midEnd    = n * 55 / 100;
-    constexpr int highStart = n * 82 / 100;
+    // Bass/mid/high/peak energy now comes from the shared BandEnergy
+    // reduction (see BandEnergy.h) instead of a copy of this same loop -
+    // "one audio analysis, six visual interpretations" also applies within
+    // a single mode's own bookkeeping, not just across modes.
+    const auto bands = computeBandEnergy(newSnapshot, appearance.sensitivity);
 
-    float bassRaw = 0.0f, midRaw = 0.0f, highRaw = 0.0f;
-    for (int i = 0; i < bassEnd; ++i)
-        bassRaw = juce::jmax(bassRaw, snapshot.fast[(size_t) i]);
-    for (int i = midStart; i < midEnd; ++i)
-        midRaw += snapshot.fast[(size_t) i];
-    midRaw /= static_cast<float>(juce::jmax(1, midEnd - midStart));
-    for (int i = highStart; i < n; ++i)
-        highRaw = juce::jmax(highRaw, snapshot.fast[(size_t) i]);
-
-    const float sens = appearance.sensitivity;
-    bassEnergy   = bassFollower.advance(juce::jlimit(0.0f, 1.0f, bassRaw * sens), appearance.smoothing);
-    midEnergy    = midFollower.advance(juce::jlimit(0.0f, 1.0f, midRaw * sens), appearance.smoothing);
-    highEnergy   = highFollower.advance(juce::jlimit(0.0f, 1.0f, highRaw * sens), appearance.smoothing);
-    overallLevel = levelFollower.advance(juce::jlimit(0.0f, 1.0f, snapshot.level * sens), appearance.smoothing);
+    bassEnergy   = bassFollower.advance(bands.bass, appearance.smoothing);
+    midEnergy    = midFollower.advance(bands.mid, appearance.smoothing);
+    highEnergy   = highFollower.advance(bands.high, appearance.smoothing);
+    overallLevel = levelFollower.advance(bands.overall, appearance.smoothing);
 
     // The entire idle/no-fake-movement guarantee lives here: flowPhase only
     // moves while snapshot.active is true (SpectrumAnalyzer's own, already-

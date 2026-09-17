@@ -6,6 +6,10 @@
 // A 360-degree radial view of the same log-frequency spectrum: one ray per
 // spectrum point, low frequencies starting at 12 o'clock and running
 // clockwise, magnitude mapped to ray length outward from a centre disc.
+//
+// PERSONALITY: futuristic. Layered radial structure - an inner ring of fine,
+// dense high-frequency spikes, the main ray ring, a peak-hold ring, and a
+// centre glow that pulses with bass - rather than a single ring of rays.
 class ModeCircular final : public VisualizerMode
 {
 public:
@@ -20,6 +24,9 @@ private:
     SpectrumAnalyzer::Snapshot snapshot;
     std::array<EnvelopeFollower, SpectrumAnalyzer::spectrumPoints> followers;
     std::array<float, SpectrumAnalyzer::spectrumPoints> displayed {};
+
+    EnvelopeFollower bassFollower;
+    float bassEnergy = 0.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ModeCircular)
 };

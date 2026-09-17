@@ -213,6 +213,41 @@ void VisualizerComponent::drawGrid(juce::Graphics& g, juce::Rectangle<float> plo
     }
 }
 
+void VisualizerComponent::drawPeakGlow(juce::Graphics& g, juce::Rectangle<float> plot) const
+{
+    // A soft halo on strong LOCAL MAXIMA of the live trace - not every point
+    // above the threshold, or a wide loud region would light up as a solid
+    // bar of glow instead of a handful of distinct highlights. Capped at 6
+    // so a loud, spiky passage can't turn into dozens of gradient fills.
+    constexpr int n = SpectrumAnalyzer::spectrumPoints;
+    constexpr float threshold = 0.72f;
+    int glowsDrawn = 0;
+
+    for (int i = 2; i < n - 2 && glowsDrawn < 6; ++i)
+    {
+        const float v = scaledFast[(size_t) i];
+        if (v < threshold)
+            continue;
+
+        if (v < scaledFast[(size_t) (i - 1)] || v < scaledFast[(size_t) (i + 1)])
+            continue; // not a local peak, just a point on the way up/down
+
+        const float x = xForPoint(i, plot);
+        const float y = yForValue(v, plot);
+        const float radius = 14.0f + v * 10.0f;
+
+        g.setGradientFill(juce::ColourGradient(kAccentColour.withAlpha(juce::jlimit(0.0f, 0.5f, (v - threshold) * 1.8f)),
+                                               x, y,
+                                               kAccentColour.withAlpha(0.0f),
+                                               x, y - radius,
+                                               true));
+        g.fillEllipse(x - radius, y - radius, radius * 2.0f, radius * 2.0f);
+
+        ++glowsDrawn;
+        i += 3; // skip past this peak's neighbouring bins
+    }
+}
+
 void VisualizerComponent::mouseMove(const juce::MouseEvent& e)
 {
     const auto plot = plotArea();
@@ -405,6 +440,8 @@ void VisualizerComponent::paint(juce::Graphics& g)
 
         g.setColour(kAccentColour.withAlpha((snapshot.active ? 0.95f : 0.4f) * brightness));
         g.strokePath(liveStroke, juce::PathStrokeType(1.6f));
+
+        drawPeakGlow(g, plot);
     }
 
     // Peak hold, drawn above the fill: a ceiling sitting over the live spectrum,

@@ -39,6 +39,7 @@ target_sources(Pulse
         Source/PulseTheme.h
         Source/VisualizerMode.h
         Source/VisualizerSettings.h
+        Source/BandEnergy.h
         Source/CurveUtils.h
         Source/VisualizerComponent.h
         Source/VisualizerComponent.cpp

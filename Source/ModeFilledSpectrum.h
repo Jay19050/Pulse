@@ -3,9 +3,13 @@
 #include <array>
 #include "VisualizerMode.h"
 
-// A single smooth filled curve of the live spectrum - no legend, no
-// peak-hold/average traces, no hover readout. The clean, modern counterpart
-// to Spectrum mode's fuller instrumentation.
+// A layered filled spectrum - no legend, no hover readout, the clean, modern
+// counterpart to Spectrum mode's fuller instrumentation.
+//
+// PERSONALITY: powerful. Three layers give it mass and depth rather than a
+// single flat fill: a faint, heavily-smoothed BACK layer (the broad shape of
+// the sound), the main filled MIDDLE body, and a bright, lightly-smoothed
+// FRONT trace riding the top edge for crisp transient detail.
 class ModeFilledSpectrum final : public VisualizerMode
 {
 public:
@@ -18,8 +22,14 @@ public:
 
 private:
     SpectrumAnalyzer::Snapshot snapshot;
-    std::array<EnvelopeFollower, SpectrumAnalyzer::spectrumPoints> followers;
-    std::array<float, SpectrumAnalyzer::spectrumPoints> displayed {};
+
+    std::array<EnvelopeFollower, SpectrumAnalyzer::spectrumPoints> backFollowers;
+    std::array<EnvelopeFollower, SpectrumAnalyzer::spectrumPoints> midFollowers;
+    std::array<EnvelopeFollower, SpectrumAnalyzer::spectrumPoints> frontFollowers;
+
+    std::array<float, SpectrumAnalyzer::spectrumPoints> backLayer {};
+    std::array<float, SpectrumAnalyzer::spectrumPoints> midLayer {};
+    std::array<float, SpectrumAnalyzer::spectrumPoints> frontLayer {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ModeFilledSpectrum)
 };

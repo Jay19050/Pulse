@@ -70,6 +70,7 @@ private:
                           juce::Rectangle<float> plot) const;
 
     void drawGrid(juce::Graphics& g, juce::Rectangle<float> plot) const;
+    void drawPeakGlow(juce::Graphics& g, juce::Rectangle<float> plot) const;
     void drawHoverReadout(juce::Graphics& g, juce::Rectangle<float> plot) const;
 
     void setTraceVisible(Trace t, bool visible);
