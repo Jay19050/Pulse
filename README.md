@@ -6,7 +6,7 @@ It analyzes system audio and turns it into a live visual representation with a f
 
 The project is inspired by the visual style and experience of modern audio monitoring tools, with a focus on a clean, responsive interface.
 
-> **Status:** Active development — Now Playing integrated
+> **Status:** Active development — Now Playing and Track Details integrated
 
 ---
 
@@ -86,6 +86,20 @@ The project is inspired by the visual style and experience of modern audio monit
 
 ---
 
+###  Track Details
+
+* Expandable track-analysis panel displayed below Now Playing
+* Compact collapsed state that expands smoothly when opened
+* Real-time BPM estimation with an `Analyzing...` state before a stable estimate is available
+* Audio energy and peak-level monitoring
+* Stereo-width measurement
+* Bass, mid, and treble energy analysis
+* Beat-pulse detection for visual feedback
+* Analysis is derived from captured audio only and does not modify system audio
+* Track Details automatically resets when the current track changes
+
+---
+
 ##  Platform
 
 Currently developed and tested for:
@@ -157,6 +171,10 @@ Pulse/
 │   ├── NowPlayingComponent.h
 │   ├── NowPlayingManager.cpp
 │   ├── NowPlayingManager.h
+│   ├── TrackAnalysis.cpp
+│   ├── TrackAnalysis.h
+│   ├── TrackDetailsComponent.cpp
+│   ├── TrackDetailsComponent.h
 │   ├── PulseTheme.h
 │   ├── SpectrumAnalyzer.cpp
 │   ├── SpectrumAnalyzer.h
@@ -226,6 +244,8 @@ Pulse/
 | `MainComponent`          | Main application interface                         |
 | `NowPlayingManager`      | Windows media-session metadata retrieval and playback-state monitoring |
 | `NowPlayingComponent`    | Non-interactive title/artist display with smooth fade animation |
+| `TrackAnalysis`          | Real-time BPM, beat, energy, peak, stereo-width, and frequency-band analysis |
+| `TrackDetailsComponent`  | Expandable Track Details UI and metric visualization |
 
 ---
 
@@ -254,6 +274,10 @@ Pulse is currently under active development.
 * [x] Apple Music metadata display
 * [x] Playback-state and track-change updates
 * [x] Smooth Now Playing fade animation
+* [x] Expandable Track Details panel
+* [x] Real-time BPM and beat analysis
+* [x] Energy, peak, stereo-width, and band-energy metrics
+* [x] Smooth Track Details expand/collapse animation
 
 ### In development
 
@@ -263,7 +287,6 @@ Pulse is currently under active development.
 * [ ] Performance settings (FPS limit, render quality)
 * [ ] Preference persistence across launches
 * [ ] Packaged Windows releases
-* [ ] Installation/distribution workflow
 
 ---
 
