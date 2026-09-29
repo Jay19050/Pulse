@@ -6,7 +6,7 @@ It analyzes system audio and turns it into a live visual representation with a f
 
 The project is inspired by the visual style and experience of modern audio monitoring tools, with a focus on a clean, responsive interface.
 
-> **Status:** Active development
+> **Status:** Active development — Now Playing integrated
 
 ---
 
@@ -71,6 +71,18 @@ The project is inspired by the visual style and experience of modern audio monit
 * Header with logo, LIVE/IDLE audio-activity indicator, and current device readout
 * Slide-out settings drawer (device selector, fullscreen, visualizer appearance)
 * Designed around real-time visual feedback
+
+###  Now Playing
+
+* Windows system media-session integration using the Windows System Media Transport Controls layer
+* Displays the currently playing track title and artist directly in the Pulse visualization area
+* Apple Music is explicitly preferred when its Windows media session is available
+* Falls back to the current Windows media session and other active playing sessions
+* Updates automatically when the track, artist, or playback state changes
+* Paused playback remains visible with a dimmed presentation
+* Smooth fade-in/fade-out when metadata becomes available or disappears
+* Runs independently from Pulse's real-time audio capture and visualization pipeline
+* Non-interactive display designed to remain visually subtle and avoid competing with the visualizer
 
 ---
 
@@ -141,6 +153,10 @@ Pulse/
 │   ├── Main.cpp
 │   ├── MainComponent.cpp
 │   ├── MainComponent.h
+│   ├── NowPlayingComponent.cpp
+│   ├── NowPlayingComponent.h
+│   ├── NowPlayingManager.cpp
+│   ├── NowPlayingManager.h
 │   ├── PulseTheme.h
 │   ├── SpectrumAnalyzer.cpp
 │   ├── SpectrumAnalyzer.h
@@ -208,6 +224,8 @@ Pulse/
 | `IconButton`             | Shared gear/close icon button                      |
 | `PulseTheme`             | Application visual styling                         |
 | `MainComponent`          | Main application interface                         |
+| `NowPlayingManager`      | Windows media-session metadata retrieval and playback-state monitoring |
+| `NowPlayingComponent`    | Non-interactive title/artist display with smooth fade animation |
 
 ---
 
@@ -232,11 +250,14 @@ Pulse is currently under active development.
 * [x] True borderless fullscreen (F11 / Esc)
 * [x] Visualizer appearance settings (Sensitivity, Smoothing, Brightness, Peak Intensity, Background)
 * [x] Layered, flowing Particles mode
+* [x] Windows Now Playing integration
+* [x] Apple Music metadata display
+* [x] Playback-state and track-change updates
+* [x] Smooth Now Playing fade animation
 
 ### In development
 
 * [ ] Further spectrum response tuning
-* [ ] Lower-latency visualization
 * [ ] Improved stereo visualization behavior
 * [ ] Improved audio-device compatibility
 * [ ] Performance settings (FPS limit, render quality)
@@ -259,7 +280,6 @@ Planned areas include:
 * Configurable visualization settings
 * Additional audio-analysis tools
 * Improved Windows distribution
-* Installer support
 * Performance optimization
 
 ---
@@ -326,7 +346,7 @@ All credit for the original inspiration and concept goes to the original project
 
 GitHub: https://github.com/Jay19050
 
-Built the original Windows/JUCE Spectrum visualizer, and added the multiple visualizer modes, output device selection, true fullscreen, and the visualizer appearance settings system.
+Built the original Windows/JUCE Spectrum visualizer, and added the multiple visualizer modes, output device selection, true fullscreen, visualizer appearance settings, and Windows Now Playing integration.
 
 ---
 
