@@ -12,6 +12,8 @@
 #include "SettingsPanel.h"
 #include "NowPlayingManager.h"
 #include "NowPlayingComponent.h"
+#include "TrackAnalysis.h"
+#include "TrackDetailsComponent.h"
 
 class MainComponent final : public juce::Component, private juce::Timer
 {
@@ -57,6 +59,8 @@ private:
     // Entirely independent of the audio/visualizer pipeline.
     NowPlayingManager nowPlayingManager;
     NowPlayingComponent nowPlaying;
+    TrackAnalysis trackAnalysis;
+    TrackDetailsComponent trackDetails;
 
     // Reconnect watchdog: if the capture thread dies mid-session (device
     // unplugged etc), retry at a throttled interval rather than hammering

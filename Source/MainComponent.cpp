@@ -34,6 +34,7 @@ MainComponent::MainComponent()
     nowPlayingManager.onChanged = [this](const NowPlayingManager::Info& info)
     {
         nowPlaying.setInfo(info);
+        trackDetails.setNowPlaying(info);
     };
 
     visualizer.onResetPeaks = [this] { analyzer.resetPeakHold(); };
@@ -41,7 +42,7 @@ MainComponent::MainComponent()
     audio.setBlockCallback([this](const float* const* channels,
                                    int numChannels,
                                    int numSamples,
-                                   double /*sampleRate*/)
+                                   double sampleRate)
     {
         if (numChannels <= 0 || channels == nullptr || channels[0] == nullptr)
             return;
@@ -55,6 +56,7 @@ MainComponent::MainComponent()
         waveform.push(left, right, numSamples);
         goniometer.pushStereo(left, right, numSamples);
         levelMeter.pushStereo(left, right, numSamples);
+        trackAnalysis.pushStereo(left, right, numSamples, sampleRate);
     });
 
     addAndMakeVisible(header);
@@ -63,6 +65,7 @@ MainComponent::MainComponent()
     addAndMakeVisible(levelMeter);
     addAndMakeVisible(modeSelector);
     addAndMakeVisible(nowPlaying);
+    addAndMakeVisible(trackDetails);
 
     nowPlayingManager.start();
     // Settings panel is added on demand in setSettingsPanelOpen() so it never
@@ -90,6 +93,7 @@ void MainComponent::startAudio()
     }
 
     analyzer.prepare(audio.getSampleRate());
+    trackAnalysis.prepare(audio.getSampleRate());
     visualizer.prepare(audio.getSampleRate());
     audioActive.store(true);
 
@@ -150,6 +154,7 @@ void MainComponent::timerCallback()
     }
 
     auto snapshot = analyzer.getSnapshot();
+    trackDetails.setAnalysis(trackAnalysis.getSnapshot());
 
     // ~50ms window - enough to read as a real waveform, short enough that
     // Waveform mode's per-pixel min/max columns stay dense on screen.
@@ -269,10 +274,13 @@ void MainComponent::resized()
     // Keep Now Playing in the upper-right of the visualization area, clear of
     // the header controls and the bottom goniometer/meter row.
     const int nowPlayingWidth = juce::jmin(300, juce::jmax(180, area.getWidth() / 3));
-    nowPlaying.setBounds(area.getRight() - nowPlayingWidth - 12,
-                         area.getY() + 10,
-                         nowPlayingWidth,
-                         42);
+    const int detailsHeight = 145;
+    const int nowPlayingHeight = 42;
+    const int rightX = area.getRight() - nowPlayingWidth - 12;
+    const int topY = area.getY() + 10;
+
+    nowPlaying.setBounds(rightX, topY, nowPlayingWidth, nowPlayingHeight);
+    trackDetails.setBounds(rightX, topY + nowPlayingHeight + 6, nowPlayingWidth, detailsHeight);
 
     if (settingsOpen)
         settingsPanel.setBounds(settingsPanelBounds());

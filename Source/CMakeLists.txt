@@ -65,6 +65,10 @@ target_sources(Pulse
         Source/NowPlayingManager.cpp
         Source/NowPlayingComponent.h
         Source/NowPlayingComponent.cpp
+        Source/TrackAnalysis.h
+        Source/TrackAnalysis.cpp
+        Source/TrackDetailsComponent.h
+        Source/TrackDetailsComponent.cpp
 )
 
 target_compile_definitions(Pulse
