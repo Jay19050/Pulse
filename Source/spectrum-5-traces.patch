@@ -1,0 +1,1337 @@
+diff -u -r a/Source/PulseTheme.h b/Source/PulseTheme.h
+--- a/Source/PulseTheme.h	2026-09-19 12:40:24.880426415 +0000
++++ b/Source/PulseTheme.h	2026-09-19 12:40:24.881467424 +0000
+@@ -25,6 +25,11 @@
+     // reads as "a ceiling on the live signal" rather than a sixth competing hue.
+     constexpr juce::uint32 PeakHold         = 0xffffb3be;
+ 
++    // Spectrum-mode comparison traces. Deliberately clear of Accent (red-pink), PeakHold
++    // (pale pink), the white AVG line, and StatusLive (green) below.
++    constexpr juce::uint32 ReferenceTrace   = 0xff4fc3c9; // teal  - REFERENCE snapshot
++    constexpr juce::uint32 SmoothedTrace    = 0xffe9b44c; // amber - 1/3-octave smoothed LIVE
++
+     // --- UI chrome tokens (header, mode selector, settings drawer) ---------
+     // Added for the UI polish pass; the visualizer panels above stay on
+     // WidgetBackground/Outline/DefaultText/Accent so this doesn't touch their look.
+diff -u -r a/Source/SpectrumAnalyzer.cpp b/Source/SpectrumAnalyzer.cpp
+--- a/Source/SpectrumAnalyzer.cpp	2026-09-19 12:40:24.884558592 +0000
++++ b/Source/SpectrumAnalyzer.cpp	2026-09-19 12:40:24.885547289 +0000
+@@ -32,14 +32,8 @@
+     // the audio thread.
+     for (int p = 0; p < spectrumPoints; ++p)
+     {
+-        const float t = static_cast<float>(p) / static_cast<float>(spectrumPoints - 1);
+-
+-        const float minHz = 20.0f;
+-        const float maxHz = static_cast<float>(sampleRate * 0.5);
+-
+-        // Balanced frequency distribution.
+-        const float shapedT = std::pow(t, 0.72f);
+-        const float hz = minHz * std::pow(maxHz / minHz, shapedT);
++        // Balanced (not plain-log) frequency distribution - see the helper.
++        const float hz = frequencyForPoint(p, sampleRate);
+ 
+         const float bin = hz * static_cast<float>(fftSize) / static_cast<float>(sampleRate);
+ 
+@@ -51,6 +45,33 @@
+     }
+ }
+ 
++float SpectrumAnalyzer::frequencyForPoint(int pointIndex, double sr) noexcept
++{
++    const float t = static_cast<float>(pointIndex) / static_cast<float>(spectrumPoints - 1);
++
++    const float minHz = minFrequencyHz;
++    const float maxHz = static_cast<float>((sr > 0.0 ? sr : 48000.0) * 0.5);
++
++    const float shapedT = std::pow(t, frequencyShape);
++    return minHz * std::pow(maxHz / minHz, shapedT);
++}
++
++float SpectrumAnalyzer::positionForFrequency(float hz, double sr) noexcept
++{
++    const float minHz = minFrequencyHz;
++    const float maxHz = static_cast<float>((sr > 0.0 ? sr : 48000.0) * 0.5);
++
++    if (hz <= 0.0f || maxHz <= minHz)
++        return -1.0f;
++
++    const float ratio = std::log(hz / minHz) / std::log(maxHz / minHz);
++
++    if (ratio <= 0.0f)
++        return ratio < 0.0f ? -1.0f : 0.0f;
++
++    return std::pow(ratio, 1.0f / frequencyShape);
++}
++
+ void SpectrumAnalyzer::pushStereo(const float* left,
+                                   const float* right,
+                                   int numSamples)
+@@ -149,7 +170,7 @@
+         const float db = 20.0f * std::log10(juce::jmax(normalizedMagnitude, 1.0e-6f));
+ 
+         // Useful dynamic range mapped to 0..1.
+-        const float normalized = juce::jlimit(0.0f, 1.0f, (db + 70.0f) / 55.0f);
++        const float normalized = juce::jlimit(0.0f, 1.0f, (db - displayFloorDb) / displaySpanDb);
+ 
+         // -----------------------------------------------------
+         // Fast live spectrum.
+@@ -158,21 +179,21 @@
+         // as frequently now that the FFT overlaps 50%.
+         // -----------------------------------------------------
+ 
+-        fast[(size_t) p] = juce::jmax(normalized, fast[(size_t) p] * 0.70f);
+-        fast[(size_t) p] *= 0.992f;
++        fast[(size_t) p] = juce::jmax(normalized, fast[(size_t) p] * fastHold);
++        fast[(size_t) p] *= fastDecay;
+ 
+         // -----------------------------------------------------
+         // Peak hold: instant attack, slow decay - the classic
+         // "loudest thing that happened recently" ceiling trace.
+         // -----------------------------------------------------
+ 
+-        peakHold[(size_t) p] = juce::jmax(peakHold[(size_t) p] * 0.996f, fast[(size_t) p]);
++        peakHold[(size_t) p] = juce::jmax(peakHold[(size_t) p] * peakDecay, fast[(size_t) p]);
+ 
+         // -----------------------------------------------------
+         // Slow reference trace.
+         // -----------------------------------------------------
+ 
+-        slow[(size_t) p] += (fast[(size_t) p] - slow[(size_t) p]) * 0.055f;
++        slow[(size_t) p] += (fast[(size_t) p] - slow[(size_t) p]) * avgCoeff;
+     }
+ }
+ 
+diff -u -r a/Source/SpectrumAnalyzer.h b/Source/SpectrumAnalyzer.h
+--- a/Source/SpectrumAnalyzer.h	2026-09-19 12:40:24.882472083 +0000
++++ b/Source/SpectrumAnalyzer.h	2026-09-19 12:40:24.883493264 +0000
+@@ -9,6 +9,55 @@
+     static constexpr int fftSize = 1 << fftOrder;
+     static constexpr int spectrumPoints = 512;
+ 
++    // ---------------------------------------------------------------------
++    // Constants that define what the three traces in Snapshot MEAN.
++    //
++    // These used to be bare literals inside processBlock()/rebuildFrequency-
++    // Mapping() (and duplicated, with a comment, in VisualizerComponent's dB
++    // readout). They are named here - with exactly the same values - so the
++    // Spectrum legend, dB axis and hover readout are derived from the single
++    // source of truth instead of a second copy that can silently drift.
++    // ---------------------------------------------------------------------
++
++    // 50% overlap: one new spectrum every hopSize input samples.
++    static constexpr int hopSize = fftSize / 2;
++
++    // Analysed level (dB) -> 0..1 trace value: 0 == displayFloorDb,
++    // 1 == displayFloorDb + displaySpanDb. Values beyond either end are clamped.
++    static constexpr float displayFloorDb = -70.0f;
++    static constexpr float displaySpanDb  = 55.0f;
++
++    // Per-block envelope coefficients (one block == hopSize samples).
++    static constexpr float fastHold  = 0.70f;   // LIVE: retained fraction of the previous value...
++    static constexpr float fastDecay = 0.992f;  // ...then this extra per-block decay
++    static constexpr float avgCoeff  = 0.055f;  // AVG: one-pole follow of LIVE
++    static constexpr float peakDecay = 0.996f;  // PEAK: per-block decay of the held value
++
++    // Frequency mapping of the 512 points: 20 Hz .. Nyquist, with the point
++    // position shaped by t^frequencyShape. This is NOT a plain log axis - see
++    // frequencyForPoint()/positionForFrequency().
++    static constexpr float minFrequencyHz = 20.0f;
++    static constexpr float frequencyShape = 0.72f;
++
++    static float dbForNormalised(float normalised) noexcept
++    {
++        return normalised * displaySpanDb + displayFloorDb;
++    }
++
++    static float normalisedForDb(float db) noexcept
++    {
++        return (db - displayFloorDb) / displaySpanDb;
++    }
++
++    // Frequency (Hz) that spectrum point `pointIndex` represents at `sampleRate`.
++    // This is the exact mapping prepare() bakes into binIndex0/binFrac.
++    static float frequencyForPoint(int pointIndex, double sampleRate) noexcept;
++
++    // Inverse of frequencyForPoint(): the position along the point axis, as a
++    // fraction 0..1 of the plot width, at which `hz` is actually drawn. Returns
++    // a value <0 or >1 when `hz` lies outside the analysed range.
++    static float positionForFrequency(float hz, double sampleRate) noexcept;
++
+     struct Snapshot
+     {
+         std::array<float, spectrumPoints> fast {};
+diff -u -r a/Source/VisualizerComponent.cpp b/Source/VisualizerComponent.cpp
+--- a/Source/VisualizerComponent.cpp	2026-09-19 12:40:24.888580684 +0000
++++ b/Source/VisualizerComponent.cpp	2026-09-19 12:40:24.889555953 +0000
+@@ -1,65 +1,106 @@
+ #include "VisualizerComponent.h"
+ #include "PulseTheme.h"
+ #include <cmath>
+-#include <vector>
+ 
+ namespace
+ {
+     constexpr float kPlotInset = 8.0f;
+ 
++    // Legend layout.
++    constexpr float kLegendWidth = 220.0f;
++    constexpr float kRowPitch    = 15.0f;
++    constexpr float kSwatchWidth = 16.0f;
++    constexpr float kTextInset   = 22.0f;
++    constexpr float kClearWidth  = 16.0f; // the "x" on the REFERENCE row
++
++    // 1/3-OCT smooths over f / 2^(1/6) .. f * 2^(1/6): a window one third of an octave wide.
++    constexpr double kHalfThirdOctave = 1.122462048309373; // 2^(1/6)
++    constexpr double kLn10Over10      = 0.23025850929940457;
++
+     const juce::Colour kAccentColour   { PulseTheme::Accent };
+     const juce::Colour kPeakHoldColour { PulseTheme::PeakHold };
+     const juce::Colour kOutlineColour  { PulseTheme::Outline };
+     const juce::Colour kTextColour     { PulseTheme::DefaultText };
++    const juce::Colour kReferenceColour { PulseTheme::ReferenceTrace };
++    const juce::Colour kSmoothedColour  { PulseTheme::SmoothedTrace };
+ 
+-    // Log-spaced frequency gridlines - the values an engineer actually looks for.
+-    const float kGridFreqs[] = { 20.0f, 50.0f, 100.0f, 200.0f, 500.0f,
+-                                 1000.0f, 2000.0f, 5000.0f, 10000.0f, 20000.0f };
++    struct GridLine
++    {
++        float value;         // Hz for the frequency grid, dB for the level grid
++        juce::String text;
++    };
+ 
+-    const float kMinFreqHz = 20.0f;
+-    const float kMaxFreqHz = 20000.0f;
++    // Frequency gridlines - the values an engineer actually looks for. Their x
++    // position comes from SpectrumAnalyzer::positionForFrequency(), i.e. from the
++    // analyzer's own point-to-frequency mapping, NOT from a plain log10 formula:
++    // the analyzer's mapping is shaped (t^0.72, up to Nyquist), so a plain-log
++    // gridline labelled "1k" would sit over roughly 2 kHz of data.
++    const std::array<GridLine, 10>& frequencyGrid()
++    {
++        static const std::array<GridLine, 10> grid { {
++            { 20.0f, "20" },     { 50.0f, "50" },     { 100.0f, "100" },   { 200.0f, "200" },
++            { 500.0f, "500" },   { 1000.0f, "1k" },   { 2000.0f, "2k" },   { 5000.0f, "5k" },
++            { 10000.0f, "10k" }, { 20000.0f, "20k" }
++        } };
++        return grid;
++    }
+ 
+-    juce::String labelForFreq(float f)
++    // Level gridlines, in the analyzer's own dB units (see displayFloorDb/SpanDb).
++    // -15 is the analyzer's display ceiling: anything louder is clamped there.
++    const std::array<GridLine, 7>& levelGrid()
+     {
+-        return f >= 1000.0f ? juce::String(static_cast<int>(f / 1000.0f)) + "k"
+-                            : juce::String(static_cast<int>(f));
++        static const std::array<GridLine, 7> grid { {
++            { -15.0f, "-15" }, { -20.0f, "-20" }, { -30.0f, "-30" }, { -40.0f, "-40" },
++            { -50.0f, "-50" }, { -60.0f, "-60" }, { -70.0f, "-70" }
++        } };
++        return grid;
+     }
+ 
+-    juce::String preciseFreq(int pointIndex)
++    juce::String preciseFreq(int pointIndex, double sampleRate)
+     {
+-        const float t = static_cast<float>(pointIndex)
+-                      / static_cast<float>(SpectrumAnalyzer::spectrumPoints - 1);
+-        const float logMin = std::log10(kMinFreqHz);
+-        const float logMax = std::log10(kMaxFreqHz);
+-        const float f = std::pow(10.0f, logMin + t * (logMax - logMin));
++        // The frequency the analyzer actually assigned to this point.
++        const float f = SpectrumAnalyzer::frequencyForPoint(pointIndex, sampleRate);
+ 
+         return f >= 1000.0f ? juce::String(f / 1000.0f, 2) + " kHz"
+                             : juce::String(f, 1) + " Hz";
+     }
+ 
+-    // SpectrumAnalyzer stores everything as a normalised 0..1 magnitude, not raw
+-    // dB. This is the inverse of the mapping it uses internally ((db + 70) / 55,
+-    // clamped), purely so the hover readout can show something in familiar units.
+-    // It is an approximation near the clamped ends of the 0..1 range - fine for a
+-    // readout, not meant for precise metering.
+-    float approxDb(float normalisedValue)
++    // Formats a 0..1 analyzer value as dB for the hover readout. The two ends of
++    // the range are clamps, not measurements, so they are printed as bounds
++    // ("< -70 dB") instead of pretending to be an exact level.
++    //
++    // NOTE: this is the analyzer's relative scale, not calibrated dBFS - a
++    // full-scale sine reads about -6 dB through the Hann window, so the unit is
++    // deliberately printed as plain "dB".
++    juce::String levelText(const char* name, float normalised)
+     {
+-        return normalisedValue * 55.0f - 70.0f;
++        constexpr float ceilingDb = SpectrumAnalyzer::displayFloorDb + SpectrumAnalyzer::displaySpanDb;
++
++        if (normalised <= 0.001f)
++            return juce::String(name) + " < " + juce::String((int) SpectrumAnalyzer::displayFloorDb) + " dB";
++
++        if (normalised >= 0.999f)
++            return juce::String(name) + " > " + juce::String((int) ceilingDb) + " dB";
++
++        return juce::String(name) + " " + juce::String(SpectrumAnalyzer::dbForNormalised(normalised), 1) + " dB";
+     }
+ 
+-    struct LegendEntry
++    // LIVE minus REFERENCE, in dB. Both inputs are 0..1 analyzer values, which are linear
++    // in dB, so the difference is just the value difference times the dB span. A value
++    // sitting on either clamp is a bound, not a measurement, so no difference is claimed.
++    juce::String diffText(float liveNormalised, float referenceNormalised)
+     {
+-        juce::Colour colour;
+-        const char*  text;
+-    };
++        auto clamped = [](float n) { return n <= 0.001f || n >= 0.999f; };
+ 
+-    std::array<LegendEntry, VisualizerComponent::kNumTraces> legendEntries()
+-    {
+-        return { {
+-            { juce::Colour(PulseTheme::Accent),                    "LIVE - real-time spectrum" },
+-            { juce::Colours::white.withAlpha(0.85f),               "AVG  - slow reference" },
+-            { juce::Colour(PulseTheme::PeakHold).withAlpha(0.75f), "PEAK HOLD" },
+-        } };
++        if (clamped(liveNormalised) || clamped(referenceNormalised))
++            return "DIFF --";
++
++        float d = (liveNormalised - referenceNormalised) * SpectrumAnalyzer::displaySpanDb;
++
++        if (std::abs(d) < 0.05f)
++            d = 0.0f; // never print "-0.0"
++
++        return juce::String("DIFF ") + (d > 0.0f ? "+" : "") + juce::String(d, 1) + " dB";
+     }
+ }
+ 
+@@ -68,14 +109,240 @@
+     setOpaque(false);
+     setMouseCursor(juce::MouseCursor::CrosshairCursor);
+ 
++    rebuildThirdOctaveTables();
++    rebuildLegendText();
++
+     // Runs independently of MainComponent's 30 Hz audio-analysis timer: this just
+     // repaints at display rate so the curve and the hover readout stay smooth.
+     startTimerHz(60);
+ }
+ 
++void VisualizerComponent::prepare(double newSampleRate)
++{
++    const double next = newSampleRate > 0.0 ? newSampleRate : 48000.0;
++
++    if (std::abs(next - sampleRate) > 0.5)
++    {
++        sampleRate = next;
++
++        // The point-to-frequency mapping depends on the sample rate, so a REFERENCE
++        // captured at the old rate would be drawn against the wrong frequencies.
++        // (Restarting capture at the SAME rate - a device switch, a reconnect - keeps it.)
++        clearReference();
++
++        rebuildThirdOctaveTables();
++        thirdOctaveDirty = true;
++        thirdOctaveCache.valid = false;
++    }
++
++    rebuildLegendText();
++    repaint();
++}
++
++void VisualizerComponent::rebuildLegendText()
++{
++    // AVG is the analyzer's one-pole follower, updated once per FFT block. Its
++    // time constant is therefore hop / (sampleRate * -ln(1 - coeff)) seconds -
++    // derived from the analyzer's own constants so the label stays true if they
++    // (or the sample rate) change.
++    const double blockSeconds = (double) SpectrumAnalyzer::hopSize / sampleRate;
++    const double avgTau = -blockSeconds / std::log(1.0 - (double) SpectrumAnalyzer::avgCoeff);
++
++    legendLabels[(size_t) TraceLive]     = "LIVE - current spectrum";
++    legendLabels[(size_t) TraceAverage]  = "AVG - " + juce::String(avgTau, 1) + " s smoothing";
++    legendLabels[(size_t) TracePeakHold] = "PEAK HOLD";
++
++    peakHoldHintLabel = "PEAK HOLD - click plot to clear";
++
++    legendLabels[(size_t) TraceReference] = "REFERENCE - frozen AVG";
++    referenceEmptyLabel = "REFERENCE - click to capture";
++    referenceWaitLabel  = "REFERENCE - needs audio";
++
++    // The smoothing window is 0.23 octave wide. Once that is narrower than one FFT bin
++    // (bin width / 0.2316), smoothing changes nothing, so state where it starts to matter.
++    const double binHz = sampleRate / (double) SpectrumAnalyzer::fftSize;
++    const double windowFraction = kHalfThirdOctave - 1.0 / kHalfThirdOctave;
++    const int    fromHz = juce::roundToInt((float) (binHz / windowFraction / 10.0)) * 10;
++
++    legendLabels[(size_t) TraceThirdOctave] = "1/3-OCT - smoothed above " + juce::String(fromHz) + " Hz";
++
++    // What the traces above are computed from. Bin width matters: below a few
++    // hundred Hz the curve is interpolated between only a handful of FFT bins.
++    footerLabel = juce::String(SpectrumAnalyzer::fftSize) + "-pt FFT - Hann - "
++                + juce::String(sampleRate / (double) SpectrumAnalyzer::fftSize, 1) + " Hz/bin";
++}
++
++VisualizerComponent::TraceStyle VisualizerComponent::traceStyle(Trace t) const
++{
++    const float brightness = juce::jlimit(0.3f, 1.0f, appearance.brightness);
++
++    switch (t)
++    {
++        case TraceLive:
++            return { kAccentColour.withAlpha(0.95f * brightness), 1.6f, true };
++
++        case TraceAverage:
++            return { juce::Colours::white.withAlpha(0.85f * brightness), 1.6f, false };
++
++        case TracePeakHold:
++            return { kPeakHoldColour.withAlpha(juce::jlimit(0.0f, 1.0f, appearance.peakIntensity * 0.75f)),
++                     1.0f, false };
++
++        case TraceReference:
++            return { kReferenceColour.withAlpha(0.9f * brightness), 1.4f, false, 7.0f, 4.0f };
++
++        case TraceThirdOctave:
++            return { kSmoothedColour.withAlpha(0.9f * brightness), 1.4f, false, 3.0f, 3.0f };
++
++        case kNumTraces:
++            break;
++    }
++
++    return { juce::Colours::white, 1.0f, false };
++}
++
++void VisualizerComponent::captureReference()
++{
++    // A flat floor is not a reference. Ignore the click until there is real signal.
++    if (! snapshot.active)
++        return;
++
++    referenceValues = snapshot.slow;
++    hasReference = true;
++    traceVisible[(size_t) TraceReference] = true;
++    referenceCache.valid = false;
++    repaint();
++}
++
++void VisualizerComponent::clearReference()
++{
++    if (! hasReference)
++        return;
++
++    hasReference = false;
++    referenceCache.valid = false;
++    repaint();
++}
++
++void VisualizerComponent::rebuildThirdOctaveTables()
++{
++    constexpr int n = SpectrumAnalyzer::spectrumPoints;
++
++    std::array<double, n> lnFreq {};
++
++    for (int p = 0; p < n; ++p)
++        lnFreq[(size_t) p] = std::log((double) SpectrumAnalyzer::frequencyForPoint(p, sampleRate));
++
++    for (int p = 0; p < n; ++p)
++    {
++        const double hz = std::exp(lnFreq[(size_t) p]);
++
++        // Window in POINT indices covering hz / 2^(1/6) .. hz * 2^(1/6), via the
++        // analyzer's own frequency mapping. Clamped to the analysed range, so the
++        // window simply narrows at the ends.
++        const float posLo = SpectrumAnalyzer::positionForFrequency((float) (hz / kHalfThirdOctave), sampleRate);
++        const float posHi = SpectrumAnalyzer::positionForFrequency((float) (hz * kHalfThirdOctave), sampleRate);
++
++        int lo = posLo <= 0.0f ? 0 : (int) std::ceil(posLo * (float) (n - 1));
++        int hi = posHi >= 1.0f ? n - 1 : (int) std::floor(posHi * (float) (n - 1));
++
++        bandLo[(size_t) p] = juce::jlimit(0, p, lo);
++        bandHi[(size_t) p] = juce::jlimit(p, n - 1, hi);
++
++        // The points are not evenly spaced in log-frequency, so weight each by the log-
++        // frequency span it covers: the average is then over frequency-on-a-log-axis,
++        // not over however many points happen to fall in the window.
++        const double prev = lnFreq[(size_t) juce::jmax(p - 1, 0)];
++        const double nxt  = lnFreq[(size_t) juce::jmin(p + 1, n - 1)];
++        bandWeight[(size_t) p] = (float) (0.5 * (nxt - prev));
++    }
++
++    prefixWeight[0] = 0.0;
++
++    for (int p = 0; p < n; ++p)
++        prefixWeight[(size_t) p + 1] = prefixWeight[(size_t) p] + (double) bandWeight[(size_t) p];
++}
++
++void VisualizerComponent::updateThirdOctave()
++{
++    constexpr int n = SpectrumAnalyzer::spectrumPoints;
++
++    // Average in POWER (the energy in the band), not in dB: the analyzer's values are
++    // linear in dB, so a plain average of them would under-report a band with a peak.
++    prefixPower[0] = 0.0;
++
++    for (int p = 0; p < n; ++p)
++    {
++        const double db = (double) SpectrumAnalyzer::dbForNormalised(snapshot.fast[(size_t) p]);
++        prefixPower[(size_t) p + 1] = prefixPower[(size_t) p]
++                                    + (double) bandWeight[(size_t) p] * std::exp(db * kLn10Over10);
++    }
++
++    for (int p = 0; p < n; ++p)
++    {
++        const size_t lo  = (size_t) bandLo[(size_t) p];
++        const size_t hi1 = (size_t) bandHi[(size_t) p] + 1;
++
++        const double meanPower = (prefixPower[hi1] - prefixPower[lo]) / (prefixWeight[hi1] - prefixWeight[lo]);
++
++        const float db = meanPower > 0.0 ? (float) (10.0 * std::log10(meanPower))
++                                         : SpectrumAnalyzer::displayFloorDb;
++
++        thirdOctave[(size_t) p] = juce::jlimit(0.0f, 1.0f, SpectrumAnalyzer::normalisedForDb(db));
++    }
++
++    thirdOctaveDirty = false;
++}
++
++void VisualizerComponent::rebuildDashed(DashedCache& cache,
++                                        const std::array<float, SpectrumAnalyzer::spectrumPoints>& values,
++                                        const TraceStyle& style, juce::Rectangle<float> plot) const
++{
++    std::array<float, SpectrumAnalyzer::spectrumPoints> scaled {};
++
++    for (size_t i = 0; i < scaled.size(); ++i)
++        scaled[i] = juce::jlimit(0.0f, 1.0f, values[i] * appearance.sensitivity);
++
++    const juce::Path curve = buildCurve(scaled, plot);
++    const float dashes[] = { style.dashOn, style.dashOff };
++
++    cache.path.clear();
++    juce::PathStrokeType(style.thickness).createDashedStroke(cache.path, curve, dashes, 2);
++
++    cache.plot  = plot;
++    cache.gain  = appearance.sensitivity;
++    cache.valid = true;
++}
++
++void VisualizerComponent::refreshTraceCaches(juce::Rectangle<float> plot)
++{
++    const float gain = appearance.sensitivity;
++
++    // Only work for traces that are actually on screen: setSnapshot() runs for this
++    // mode even while another mode is showing, so nothing heavy may live there.
++    if (traceVisible[(size_t) TraceThirdOctave])
++    {
++        if (thirdOctaveDirty)
++        {
++            updateThirdOctave();
++            thirdOctaveCache.valid = false;
++        }
++
++        if (! thirdOctaveCache.valid || thirdOctaveCache.plot != plot || thirdOctaveCache.gain != gain)
++            rebuildDashed(thirdOctaveCache, thirdOctave, traceStyle(TraceThirdOctave), plot);
++    }
++
++    if (hasReference && traceVisible[(size_t) TraceReference])
++    {
++        if (! referenceCache.valid || referenceCache.plot != plot || referenceCache.gain != gain)
++            rebuildDashed(referenceCache, referenceValues, traceStyle(TraceReference), plot);
++    }
++}
++
+ void VisualizerComponent::setSnapshot(const SpectrumAnalyzer::Snapshot& newSnapshot)
+ {
+     snapshot = newSnapshot;
++    thirdOctaveDirty = true; // just a flag: the smoothing itself runs lazily in paint()
+     recomputeScaled();
+ }
+ 
+@@ -99,7 +366,7 @@
+     return getLocalBounds().toFloat()
+              .reduced(kPlotInset)
+              .withTrimmedBottom(16.0f)      // frequency axis labels
+-             .withTrimmedLeft(kLeftGutter); // dB-ish scale
++             .withTrimmedLeft(kLeftGutter); // dB scale
+ }
+ 
+ float VisualizerComponent::xForPoint(int pointIndex, juce::Rectangle<float> plot) const
+@@ -169,44 +436,71 @@
+ 
+ void VisualizerComponent::drawGrid(juce::Graphics& g, juce::Rectangle<float> plot) const
+ {
+-    g.setColour(kOutlineColour.withAlpha(0.35f));
++    const auto& freqGrid  = frequencyGrid();
++    const auto& levelLines = levelGrid();
+ 
+-    const float logMin = std::log10(kMinFreqHz);
+-    const float logMax = std::log10(kMaxFreqHz);
++    // Sensitivity is a display gain, so a level line for D dB sits at
++    // normalisedForDb(D) * sensitivity - the same scaling the traces get. At the
++    // default 1.0 this is just the analyzer's plain mapping.
++    const float gain = appearance.sensitivity;
+ 
+-    for (const float f : kGridFreqs)
++    g.setColour(kOutlineColour.withAlpha(0.35f));
++
++    for (const auto& f : freqGrid)
+     {
+-        const float t = (std::log10(f) - logMin) / (logMax - logMin);
+-        const float x = plot.getX() + t * plot.getWidth();
+-        g.drawVerticalLine(static_cast<int>(x), plot.getY(), plot.getBottom());
++        const float t = SpectrumAnalyzer::positionForFrequency(f.value, sampleRate);
++
++        if (t < 0.0f || t > 1.0f)
++            continue; // outside the analysed range (e.g. 20k on a low sample rate)
++
++        g.drawVerticalLine(static_cast<int>(plot.getX() + t * plot.getWidth()), plot.getY(), plot.getBottom());
+     }
+ 
+-    for (int i = 1; i < 4; ++i)
++    for (const auto& d : levelLines)
+     {
+-        const float y = plot.getY() + plot.getHeight() * (static_cast<float>(i) / 4.0f);
+-        g.drawHorizontalLine(static_cast<int>(y), plot.getX(), plot.getRight());
++        const float v = SpectrumAnalyzer::normalisedForDb(d.value) * gain;
++
++        if (v <= 0.0f || v >= 1.0f)
++            continue; // the plot's own top/bottom edges are the frame
++
++        g.drawHorizontalLine(static_cast<int>(yForValue(v, plot)), plot.getX(), plot.getRight());
+     }
+ 
+     g.setColour(kTextColour.withAlpha(0.5f));
+     g.setFont(11.0f);
+ 
+-    for (const float f : kGridFreqs)
++    for (const auto& f : freqGrid)
+     {
+-        const float t = (std::log10(f) - logMin) / (logMax - logMin);
++        const float t = SpectrumAnalyzer::positionForFrequency(f.value, sampleRate);
++
++        if (t < 0.0f || t > 1.0f)
++            continue;
++
+         const float x = plot.getX() + t * plot.getWidth();
+-        g.drawText(labelForFreq(f),
++        g.drawText(f.text,
+                    juce::Rectangle<float>(x - 20.0f, plot.getBottom() + 2.0f, 40.0f, 14.0f),
+                    juce::Justification::centred);
+     }
+ 
+     g.setFont(10.0f);
+ 
+-    for (int i = 0; i <= 4; ++i)
++    float lastLabelY = -1000.0f;
++
++    for (const auto& d : levelLines)
+     {
+-        const float norm = 1.0f - static_cast<float>(i) / 4.0f;
+-        const float y = yForValue(norm, plot);
++        const float v = SpectrumAnalyzer::normalisedForDb(d.value) * gain;
++
++        if (v < 0.0f || v > 1.0f)
++            continue;
++
++        const float y = yForValue(v, plot);
++
++        if (std::abs(y - lastLabelY) < 12.0f)
++            continue; // don't stack labels on a very short window
+ 
+-        g.drawText(juce::String(static_cast<int>(approxDb(norm))),
++        lastLabelY = y;
++
++        g.drawText(d.text,
+                    juce::Rectangle<float>(plot.getX() - kLeftGutter, y - 7.0f,
+                                           kLeftGutter - 5.0f, 14.0f),
+                    juce::Justification::centredRight);
+@@ -251,21 +545,45 @@
+ void VisualizerComponent::mouseMove(const juce::MouseEvent& e)
+ {
+     const auto plot = plotArea();
+-    const float x = static_cast<float>(e.position.x);
+-    const float next = plot.contains(e.position) ? x : -1.0f;
+ 
+-    if (next != hoverX)
++    const bool overLegend = legendPanelBounds().contains(e.position);
++    const bool overHandle = legendHandleBounds().contains(e.position);
++
++    // No plot crosshair while the pointer is on the legend: the legend is a
++    // control surface, and a hairline drawn through its text just adds noise.
++    const float nextX = (plot.contains(e.position) && ! overLegend) ? static_cast<float>(e.position.x)
++                                                                     : -1.0f;
++    const int nextRow = overHandle                      ? kHandleRow
++                      : overReferenceClear(e.position)  ? kClearRow
++                                                        : legendRowAt(e.position);
++
++    bool changed = false;
++
++    if (nextX != hoverX)
+     {
+-        hoverX = next;
+-        repaint();
++        hoverX = nextX;
++        changed = true;
++    }
++
++    if (nextRow != hoverRow)
++    {
++        hoverRow = nextRow;
++        setMouseCursor(hoverRow >= 0 ? juce::MouseCursor::PointingHandCursor
++                                     : juce::MouseCursor::CrosshairCursor);
++        changed = true;
+     }
++
++    if (changed)
++        repaint();
+ }
+ 
+ void VisualizerComponent::mouseExit(const juce::MouseEvent&)
+ {
+-    if (hoverX >= 0.0f)
++    if (hoverX >= 0.0f || hoverRow >= 0)
+     {
+         hoverX = -1.0f;
++        hoverRow = -1;
++        setMouseCursor(juce::MouseCursor::CrosshairCursor);
+         repaint();
+     }
+ }
+@@ -287,27 +605,37 @@
+         return;
+ 
+     legendCollapsed = collapsed;
++
++    // The panel just changed size, so whatever the pointer was over is stale;
++    // the next mouseMove() re-derives it.
++    hoverRow = -1;
+     repaint();
+ }
+ 
+ juce::Rectangle<float> VisualizerComponent::legendHandleBounds() const
+ {
+     const auto plot = plotArea();
+-    return { plot.getX() + 8.0f, plot.getY() + 6.0f, 220.0f, 14.0f };
++    return { plot.getX() + 8.0f, plot.getY() + 6.0f, kLegendWidth, 14.0f };
+ }
+ 
+ juce::Rectangle<float> VisualizerComponent::legendRowBounds(int index) const
+ {
+-    return legendHandleBounds().translated(0.0f, 15.0f * static_cast<float>(index + 1));
++    const auto handle = legendHandleBounds();
++
++    // Full-pitch rows: contiguous, so there is no dead pixel between two rows.
++    return { handle.getX(), handle.getY() + kRowPitch * static_cast<float>(index + 1),
++             handle.getWidth(), kRowPitch };
+ }
+ 
+ juce::Rectangle<float> VisualizerComponent::legendPanelBounds() const
+ {
+     const auto handle = legendHandleBounds();
+-    const int  rows   = legendCollapsed ? 1 : (kNumTraces + 1);
++
++    // handle + one row per trace + the info footer
++    const int rows = legendCollapsed ? 1 : (kNumTraces + 2);
+ 
+     return { handle.getX() - 5.0f, handle.getY() - 4.0f,
+-             handle.getWidth() + 10.0f, 15.0f * static_cast<float>(rows) + 6.0f };
++             handle.getWidth() + 10.0f, kRowPitch * static_cast<float>(rows) + 6.0f };
+ }
+ 
+ int VisualizerComponent::legendRowAt(juce::Point<float> p) const
+@@ -315,26 +643,34 @@
+     if (legendCollapsed)
+         return -1;
+ 
+-    const auto panel = legendPanelBounds();
+-
+-    if (! panel.contains(p))
+-        return -1;
+-
+-    if (legendHandleBounds().contains(p))
+-        return -1;
+-
++    // Only a point genuinely inside a trace row counts. (The old version snapped
++    // any click inside the panel to the nearest row, which would now turn a click
++    // on the footer into a toggle of the last trace.)
+     for (int i = 0; i < kNumTraces; ++i)
+         if (legendRowBounds(i).contains(p))
+             return i;
+ 
+-    const auto  row0 = legendRowBounds(0);
+-    const float rel  = (p.y - row0.getY()) / 15.0f;
++    return -1;
++}
+ 
+-    return juce::jlimit(0, kNumTraces - 1, static_cast<int>(std::round(rel)));
++juce::Rectangle<float> VisualizerComponent::referenceClearBounds() const
++{
++    const auto row = legendRowBounds(TraceReference);
++    return { row.getRight() - kClearWidth, row.getY(), kClearWidth, row.getHeight() };
++}
++
++bool VisualizerComponent::overReferenceClear(juce::Point<float> p) const
++{
++    return hasReference && ! legendCollapsed && referenceClearBounds().contains(p);
+ }
+ 
+ void VisualizerComponent::mouseDown(const juce::MouseEvent& e)
+ {
++    // Only the primary button drives the legend/plot; a right or middle click
++    // must not toggle a trace or throw away the peak hold you were reading.
++    if (! e.mods.isLeftButtonDown())
++        return;
++
+     // Handle first: it is the outermost control, and this is the only thing left
+     // to click once the legend is collapsed.
+     if (legendHandleBounds().contains(e.position))
+@@ -343,24 +679,52 @@
+         return;
+     }
+ 
++    // The REFERENCE row's "x" throws the captured reference away.
++    if (overReferenceClear(e.position))
++    {
++        clearReference();
++        return;
++    }
++
+     // The legend is the control surface: a row is a switch for its trace.
+     const int row = legendRowAt(e.position);
+ 
+     if (row >= 0)
+     {
+         const auto trace = static_cast<Trace>(row);
++
++        // An empty REFERENCE has nothing to show or hide: its first click captures.
++        if (trace == TraceReference && ! hasReference)
++        {
++            captureReference();
++            return;
++        }
++
+         setTraceVisible(trace, ! isTraceVisible(trace));
+         return;
+     }
+ 
+-    // Dead space inside the legend panel must not fall through to onResetPeaks -
+-    // a click aimed at the legend that missed a row by a couple of pixels
+-    // shouldn't throw away the peak hold you were reading.
++    // Dead space inside the legend panel (padding, the info footer) must not fall
++    // through to onResetPeaks - a click aimed at the legend that missed a row by a
++    // couple of pixels shouldn't throw away the peak hold you were reading.
+     if (legendPanelBounds().contains(e.position))
+         return;
+ 
++    // "Click plot to clear": the plot itself, not the axis labels around it.
++    if (! plotArea().contains(e.position))
++        return;
++
+     if (onResetPeaks != nullptr)
++    {
+         onResetPeaks();
++
++        // Show the result immediately instead of waiting for the next 30 Hz
++        // snapshot. This is exactly the state SpectrumAnalyzer is now in: after
++        // resetPeakHold() its next block yields peak = max(0, fast) = fast.
++        snapshot.peak = snapshot.fast;
++        recomputeScaled();
++        repaint();
++    }
+ }
+ 
+ void VisualizerComponent::drawLegendBackdrop(juce::Graphics& g) const
+@@ -372,10 +736,48 @@
+     g.fillRoundedRectangle(legendPanelBounds(), 4.0f);
+ }
+ 
+-void VisualizerComponent::drawLegendForeground(juce::Graphics& g) const
++void VisualizerComponent::drawTraceSwatch(juce::Graphics& g, Trace t,
++                                          juce::Rectangle<float> row, bool on) const
+ {
+-    const auto entries = legendEntries();
++    const auto style = traceStyle(t);
++
++    // An empty REFERENCE has nothing to show yet: its key is dimmed like a hidden trace.
++    const bool dim = ! on || (t == TraceReference && ! hasReference);
++    const float fade = dim ? 0.22f : 1.0f;
++
++    // Peak Intensity can dial the peak-hold stroke all the way to invisible on the
++    // graph; keep its key legible anyway so the row is still identifiable.
++    const auto colour = style.colour.withAlpha(juce::jmax(0.3f, style.colour.getFloatAlpha()))
++                                    .withMultipliedAlpha(fade);
++
++    const float x = row.getX();
++    const float y = style.filled ? row.getCentreY() - 2.0f : row.getCentreY();
++
++    // A filled trace (LIVE) gets a little fill under its line, like the graph.
++    if (style.filled)
++    {
++        g.setGradientFill(juce::ColourGradient(colour.withMultipliedAlpha(0.55f), x, y,
++                                               colour.withMultipliedAlpha(0.05f), x, y + 6.0f,
++                                               false));
++        g.fillRect(x, y, kSwatchWidth, 6.0f);
++    }
++
++    g.setColour(colour);
+ 
++    if (style.dashOn > 0.0f)
++    {
++        // Same dash pattern as the graph line, so the key matches what it describes.
++        for (float d = 0.0f; d < kSwatchWidth; d += style.dashOn + style.dashOff)
++            g.drawLine(x + d, y, x + juce::jmin(d + style.dashOn, kSwatchWidth), y, style.thickness);
++    }
++    else
++    {
++        g.drawLine(x, y, x + kSwatchWidth, y, style.thickness);
++    }
++}
++
++void VisualizerComponent::drawLegendForeground(juce::Graphics& g) const
++{
+     // A second, much fainter wash over the traces just before the text: a trace
+     // crossing the legend keeps most of its colour and stays visible, rather than
+     // being erased by an opaque backdrop drawn on top of it.
+@@ -384,37 +786,65 @@
+ 
+     g.setFont(11.0f);
+ 
+-    g.setColour(kTextColour.withAlpha(0.85f));
++    g.setColour(kTextColour.withAlpha(hoverRow == kHandleRow ? 1.0f : 0.85f));
+     g.drawText(legendCollapsed ? "legend  >" : "legend  v",
+                legendHandleBounds(), juce::Justification::centredLeft);
+ 
+     if (legendCollapsed)
+         return;
+ 
++    // Subtle affordance: the row under the pointer is a switch.
++    if (hoverRow >= 0 && hoverRow < kNumTraces)
++    {
++        g.setColour(juce::Colours::white.withAlpha(0.06f));
++        g.fillRoundedRectangle(legendRowBounds(hoverRow).expanded(3.0f, 0.0f), 3.0f);
++    }
++
+     for (int i = 0; i < kNumTraces; ++i)
+     {
+-        const auto& e   = entries[(size_t) i];
+-        const auto  row = legendRowBounds(i);
+-        const bool  on  = traceVisible[(size_t) i];
++        const auto row = legendRowBounds(i);
++        const bool on  = traceVisible[(size_t) i];
+ 
+-        g.setColour(e.colour.withMultipliedAlpha(on ? 1.0f : 0.22f));
+-        g.fillRect(row.getX(), row.getCentreY() - 1.5f, 14.0f, 3.0f);
++        drawTraceSwatch(g, static_cast<Trace>(i), row, on);
+ 
+-        juce::String text = e.text;
++        const bool emptyReference = (i == TraceReference && ! hasReference);
+ 
+-        if (i == TracePeakHold && on)
+-            text += " - click plot to clear";
++        const juce::String& text = (i == TracePeakHold && on) ? peakHoldHintLabel
++                                 : emptyReference             ? (snapshot.active ? referenceEmptyLabel
++                                                                                 : referenceWaitLabel)
++                                                              : legendLabels[(size_t) i];
+ 
+-        g.setColour(kTextColour.withAlpha(on ? 0.85f : 0.35f));
+-        g.drawText(text, row.withTrimmedLeft(20.0f), juce::Justification::centredLeft);
++        // An empty REFERENCE is an action ("click to capture"), not a hidden trace, so
++        // it reads brighter than a dimmed row - unless there is no audio to capture yet.
++        const float textAlpha = emptyReference ? (snapshot.active ? 0.6f : 0.35f)
++                                               : (on ? 0.85f : 0.35f);
++
++        g.setColour(kTextColour.withAlpha(textAlpha));
++        g.drawText(text,
++                   row.withTrimmedLeft(kTextInset).withTrimmedRight(i == TraceReference && hasReference ? kClearWidth : 0.0f),
++                   juce::Justification::centredLeft);
++    }
++
++    // The captured REFERENCE can be discarded with its "x".
++    if (hasReference)
++    {
++        g.setColour(kTextColour.withAlpha(hoverRow == kClearRow ? 0.95f : 0.5f));
++        g.drawText("x", referenceClearBounds(), juce::Justification::centred);
+     }
++
++    // Footer: what the traces are computed from. Not interactive.
++    g.setFont(10.0f);
++    g.setColour(kTextColour.withAlpha(0.45f));
++    g.drawText(footerLabel, legendRowBounds(kNumTraces).withTrimmedLeft(kTextInset),
++               juce::Justification::centredLeft);
+ }
+ 
+ void VisualizerComponent::paint(juce::Graphics& g)
+ {
+     const auto plot = plotArea();
+     const float brightness = juce::jlimit(0.3f, 1.0f, appearance.brightness);
+-    const float peakAlpha = juce::jlimit(0.0f, 1.0f, appearance.peakIntensity * 0.75f);
++
++    refreshTraceCaches(plot);
+ 
+     PulseTheme::panelBackground(g, getLocalBounds().toFloat(), 6.0f,
+                                  PulseTheme::backgroundColourFor(appearance.background));
+@@ -426,6 +856,7 @@
+     // LIVE: filled, in the accent colour. This is what's happening right now.
+     if (traceVisible[(size_t) TraceLive])
+     {
++        const auto style = traceStyle(TraceLive);
+         const juce::Path liveStroke = buildCurve(scaledFast, plot);
+ 
+         juce::Path liveFilled = liveStroke;
+@@ -438,8 +869,9 @@
+                                                false));
+         g.fillPath(liveFilled);
+ 
+-        g.setColour(kAccentColour.withAlpha((snapshot.active ? 0.95f : 0.4f) * brightness));
+-        g.strokePath(liveStroke, juce::PathStrokeType(1.6f));
++        // Dimmed while there is no signal (0.4 / 0.95 of the active alpha).
++        g.setColour(snapshot.active ? style.colour : style.colour.withMultipliedAlpha(0.4f / 0.95f));
++        g.strokePath(liveStroke, juce::PathStrokeType(style.thickness));
+ 
+         drawPeakGlow(g, plot);
+     }
+@@ -448,15 +880,37 @@
+     // not another curve competing with it.
+     if (traceVisible[(size_t) TracePeakHold])
+     {
+-        g.setColour(kPeakHoldColour.withAlpha(peakAlpha));
+-        g.strokePath(buildCurve(scaledPeak, plot), juce::PathStrokeType(1.0f));
++        const auto style = traceStyle(TracePeakHold);
++
++        g.setColour(style.colour);
++        g.strokePath(buildCurve(scaledPeak, plot), juce::PathStrokeType(style.thickness));
++    }
++
++    // 1/3-OCT and REFERENCE: dashed, so they read as comparison lines rather than
++    // as more live data. Drawn before AVG so AVG stays on top of them.
++    if (traceVisible[(size_t) TraceThirdOctave])
++    {
++        const auto style = traceStyle(TraceThirdOctave);
++
++        g.setColour(style.colour);
++        g.strokePath(thirdOctaveCache.path, juce::PathStrokeType(style.thickness));
++    }
++
++    if (hasReference && traceVisible[(size_t) TraceReference])
++    {
++        const auto style = traceStyle(TraceReference);
++
++        g.setColour(style.colour);
++        g.strokePath(referenceCache.path, juce::PathStrokeType(style.thickness));
+     }
+ 
+     // AVG: unfilled ghost, drawn last so it stays readable on top of the fill.
+     if (traceVisible[(size_t) TraceAverage])
+     {
+-        g.setColour(juce::Colours::white.withAlpha(0.85f * brightness));
+-        g.strokePath(buildCurve(scaledSlow, plot), juce::PathStrokeType(1.6f));
++        const auto style = traceStyle(TraceAverage);
++
++        g.setColour(style.colour);
++        g.strokePath(buildCurve(scaledSlow, plot), juce::PathStrokeType(style.thickness));
+     }
+ 
+     // Foreground last: the legend and hover readout ride on top of every trace.
+@@ -477,46 +931,74 @@
+     g.drawVerticalLine(static_cast<int>(x), plot.getY(), plot.getBottom());
+ 
+     struct Row { juce::Colour colour; juce::String text; };
+-    std::vector<Row> rows;
+ 
+-    rows.push_back({ kTextColour, preciseFreq(i) });
++    // Frequency + one row per trace. Fixed capacity: no allocation for the list
++    // itself on every hover repaint.
++    std::array<Row, kNumTraces + 2> rows; // frequency + every trace + DIFF
++    size_t numRows = 0;
+ 
++    rows[numRows++] = Row { kTextColour, preciseFreq(i, sampleRate) };
++
++    // The DOT sits where the trace is drawn (sensitivity-scaled); the NUMBER is
++    // the real analysed level (unscaled) - see the note on scaledFast.
+     if (traceVisible[(size_t) TraceLive])
+     {
+         g.setColour(kAccentColour);
+         g.fillEllipse(x - 2.5f, yForValue(scaledFast[idx], plot) - 2.5f, 5.0f, 5.0f);
+-        rows.push_back({ kAccentColour, "LIVE " + juce::String(approxDb(scaledFast[idx]), 1) + " dB" });
++        rows[numRows++] = Row { kAccentColour, levelText("LIVE", snapshot.fast[idx]) };
+     }
+ 
+     if (traceVisible[(size_t) TraceAverage])
+     {
+         g.setColour(juce::Colours::white.withAlpha(0.9f));
+         g.fillEllipse(x - 2.5f, yForValue(scaledSlow[idx], plot) - 2.5f, 5.0f, 5.0f);
+-        rows.push_back({ juce::Colours::white, "AVG  " + juce::String(approxDb(scaledSlow[idx]), 1) + " dB" });
++        rows[numRows++] = Row { juce::Colours::white, levelText("AVG", snapshot.slow[idx]) };
+     }
+ 
+     if (traceVisible[(size_t) TracePeakHold])
+     {
+         g.setColour(kPeakHoldColour);
+         g.fillEllipse(x - 2.5f, yForValue(scaledPeak[idx], plot) - 2.5f, 5.0f, 5.0f);
+-        rows.push_back({ kPeakHoldColour, "PEAK " + juce::String(approxDb(scaledPeak[idx]), 1) + " dB" });
++        rows[numRows++] = Row { kPeakHoldColour, levelText("PEAK", snapshot.peak[idx]) };
+     }
+ 
++    const bool referenceShown = hasReference && traceVisible[(size_t) TraceReference];
++
++    if (referenceShown)
++    {
++        g.setColour(kReferenceColour);
++        g.fillEllipse(x - 2.5f, yForValue(referenceValues[idx] * appearance.sensitivity, plot) - 2.5f, 5.0f, 5.0f);
++        rows[numRows++] = Row { kReferenceColour, levelText("REF", referenceValues[idx]) };
++    }
++
++    if (traceVisible[(size_t) TraceThirdOctave])
++    {
++        g.setColour(kSmoothedColour);
++        g.fillEllipse(x - 2.5f, yForValue(thirdOctave[idx] * appearance.sensitivity, plot) - 2.5f, 5.0f, 5.0f);
++        rows[numRows++] = Row { kSmoothedColour, levelText("1/3 OCT", thirdOctave[idx]) };
++    }
++
++    // LIVE against the captured reference: the "what changed" number.
++    if (referenceShown && traceVisible[(size_t) TraceLive])
++        rows[numRows++] = Row { kReferenceColour, diffText(snapshot.fast[idx], referenceValues[idx]) };
++
+     // Row 0 is just the frequency, which belongs to the cursor rather than any
+     // trace. If it's the only row, every value-bearing trace is off - nothing
+     // worth boxing, so leave the crosshair and stop.
+-    if (rows.size() < 2)
++    if (numRows < 2)
+         return;
+ 
+-    constexpr float kBoxW = 118.0f;
+-    const float     kBoxH = 12.0f + 15.0f * static_cast<float>(rows.size());
++    constexpr float kBoxW = 130.0f;
++    const float     kBoxH = 12.0f + kRowPitch * static_cast<float>(numRows);
+ 
+     // Flips to the other side of the crosshair near the right edge so it stays
+     // on screen.
+     const bool  flip = x + 10.0f + kBoxW > plot.getRight();
+     const float boxX = flip ? x - 10.0f - kBoxW : x + 10.0f;
+ 
+-    auto box = juce::Rectangle<float>(boxX, plot.getBottom() - kBoxH - 6.0f, kBoxW, kBoxH);
++    // Bottom-anchored, but never pushed above the plot on a short window.
++    auto box = juce::Rectangle<float>(boxX, juce::jmax(plot.getY() + 4.0f, plot.getBottom() - kBoxH - 6.0f),
++                                      kBoxW, kBoxH);
+ 
+     g.setColour(juce::Colour(PulseTheme::WindowBackground).withAlpha(0.92f));
+     g.fillRoundedRectangle(box, 4.0f);
+@@ -524,14 +1006,14 @@
+     g.setColour(kOutlineColour.withAlpha(0.6f));
+     g.drawRoundedRectangle(box, 4.0f, 1.0f);
+ 
+-    auto row = box.reduced(8.0f, 6.0f).removeFromTop(15.0f);
++    auto row = box.reduced(8.0f, 6.0f).removeFromTop(kRowPitch);
+ 
+     g.setFont(11.0f);
+ 
+-    for (const auto& r : rows)
++    for (size_t r = 0; r < numRows; ++r)
+     {
+-        g.setColour(r.colour);
+-        g.drawText(r.text, row, juce::Justification::centredLeft);
+-        row.translate(0.0f, 15.0f);
++        g.setColour(rows[r].colour);
++        g.drawText(rows[r].text, row, juce::Justification::centredLeft);
++        row.translate(0.0f, kRowPitch);
+     }
+ }
+diff -u -r a/Source/VisualizerComponent.h b/Source/VisualizerComponent.h
+--- a/Source/VisualizerComponent.h	2026-09-19 12:40:24.886524197 +0000
++++ b/Source/VisualizerComponent.h	2026-09-19 12:40:24.887532922 +0000
+@@ -1,24 +1,39 @@
+ #pragma once
+ 
+ #include <JuceHeader.h>
++#include <array>
+ #include <functional>
+ #include "SpectrumAnalyzer.h"
+ #include "VisualizerMode.h"
+ 
+-// Real-time spectrum display, restyled to match the FxSound Mac reference design:
+-// dark panel, log-frequency grid, a collapsible legend with per-trace visibility
+-// toggles, a hover crosshair + readout box, and a slow-decaying peak-hold trace.
++// Real-time spectrum display: dark panel, frequency/dB grid, a collapsible legend
++// with per-trace visibility toggles, a hover crosshair + multi-trace readout, and
++// a slow-decaying peak-hold trace.
+ //
+-// Pulse has no DSP stage yet, so there is no dry/wet distinction to draw - unlike
+-// the reference, which plots pre- and post-processing spectra together. What
+-// SpectrumAnalyzer calls "fast" and "slow" are shown here as LIVE (the real-time
+-// curve, filled) and AVG (a slower trailing reference, unfilled ghost), plus PEAK
+-// HOLD (a decaying ceiling on LIVE).
++// Every trace drawn here is REAL data out of the one shared FFT in
++// SpectrumAnalyzer - this component never runs its own analysis:
+ //
+-// This is the "Spectrum" visualizer mode - the original (and still default)
+-// Pulse view. It predates VisualizerMode and has its own richer feature set
+-// (legend, hover readout, per-trace toggles) that the other modes don't need,
+-// so it keeps its existing name and API rather than being renamed to fit them.
++//   LIVE       Snapshot::fast - the current spectrum (filled).
++//   AVG        Snapshot::slow - a one-pole follower of LIVE. Its time constant
++//              depends on the sample rate and is computed from the analyzer's own
++//              coefficient (see rebuildLegendText()), not hard-coded.
++//   PEAK HOLD  Snapshot::peak - instant attack, slow decay. Click the plot to clear.
++//   REFERENCE  A frozen copy of AVG, captured on demand by clicking its legend row
++//              (teal, long dashes). Real measured data from the user's own audio -
++//              not a simulated curve. Cleared with its "x", and automatically when
++//              the sample rate changes (the frequency mapping would no longer line up).
++//   1/3-OCT    LIVE averaged (in power) over a 1/3-octave window (amber, short
++//              dashes). A pure re-reading of the existing 512-point LIVE trace -
++//              no extra FFT - computed lazily, only while the trace is visible.
++//
++// Pulse has no DSP stage, so there is deliberately no IN/OUT pair, EQ curve or
++// "measured" (OUT minus IN) trace as in the FxSound reference: those would all be
++// either duplicates of LIVE or constant zero.
++//
++// This is the "Spectrum" visualizer mode - the original (and still default) Pulse
++// view. It predates VisualizerMode and has its own richer feature set (legend,
++// hover readout, per-trace toggles) that the other modes don't need, so it keeps
++// its existing name and API rather than being renamed to fit them.
+ class VisualizerComponent final : public VisualizerMode, private juce::Timer
+ {
+ public:
+@@ -27,6 +42,8 @@
+         TraceLive = 0,
+         TraceAverage,
+         TracePeakHold,
++        TraceReference,
++        TraceThirdOctave,
+         kNumTraces
+     };
+ 
+@@ -35,6 +52,7 @@
+     void setSnapshot(const SpectrumAnalyzer::Snapshot& newSnapshot);
+ 
+     // VisualizerMode
++    void prepare(double newSampleRate) override;
+     void updateData(const SpectrumAnalyzer::Snapshot& snapshot, const std::vector<float>&) override
+     {
+         setSnapshot(snapshot); // this mode doesn't use the raw waveform
+@@ -56,9 +74,43 @@
+     std::function<void()> onResetPeaks;
+ 
+ private:
++    // How one trace is drawn. The graph AND the legend swatch both read this, so
++    // the key can never drift out of step with the line it describes.
++    struct TraceStyle
++    {
++        juce::Colour colour;
++        float thickness = 1.0f;
++        bool filled = false; // drawn with a gradient fill under the line
++        float dashOn  = 0.0f; // px; both 0 == solid line
++        float dashOff = 0.0f;
++    };
++
++    // A dashed trace is expensive to rebuild (flatten + dash a 512-point curve), so
++    // its stroked path is cached and rebuilt only when its data, the plot rectangle
++    // or the display gain changes.
++    struct DashedCache
++    {
++        juce::Path path;
++        juce::Rectangle<float> plot;
++        float gain = 0.0f;
++        bool valid = false;
++    };
++
+     void timerCallback() override;
+ 
+     void recomputeScaled();
++    void rebuildLegendText();
++
++    void captureReference();
++    void clearReference();
++    void rebuildThirdOctaveTables();
++    void updateThirdOctave();
++    void refreshTraceCaches(juce::Rectangle<float> plot);
++    void rebuildDashed(DashedCache& cache,
++                       const std::array<float, SpectrumAnalyzer::spectrumPoints>& values,
++                       const TraceStyle& style, juce::Rectangle<float> plot) const;
++
++    TraceStyle traceStyle(Trace t) const;
+ 
+     juce::Rectangle<float> plotArea() const;
+ 
+@@ -77,30 +129,78 @@
+     bool isTraceVisible(Trace t) const { return traceVisible[(size_t) t]; }
+     void setLegendCollapsed(bool collapsed);
+ 
++    // Legend geometry. Layout, top to bottom: handle, one row per trace, footer.
++    // Rows are contiguous (no dead gaps) so every pixel of a row is its click target.
+     juce::Rectangle<float> legendHandleBounds() const;
+     juce::Rectangle<float> legendRowBounds(int index) const;
+     juce::Rectangle<float> legendPanelBounds() const;
+-    int legendRowAt(juce::Point<float> p) const;
++    int legendRowAt(juce::Point<float> p) const; // trace row under p, or -1
++    juce::Rectangle<float> referenceClearBounds() const; // the "x" on the REFERENCE row
++    bool overReferenceClear(juce::Point<float> p) const;
+ 
+     void drawLegendBackdrop(juce::Graphics& g) const;
+     void drawLegendForeground(juce::Graphics& g) const;
++    void drawTraceSwatch(juce::Graphics& g, Trace t, juce::Rectangle<float> row, bool on) const;
+ 
+     SpectrumAnalyzer::Snapshot snapshot;
+ 
+     // Sensitivity-scaled copies of fast/slow/peak, recomputed in setSnapshot().
+-    // Both the curves AND the hover readout (dot position + dB text) read from
+-    // these, not the raw snapshot, so the readout always matches what's drawn -
+-    // Sensitivity is a visual-appearance control, but decoupling the on-screen
+-    // dot from the printed number would look like a bug.
++    // These drive only what is DRAWN (curve height, hover dot position).
++    //
++    // Sensitivity is a display gain: the dB grid is placed with the same gain
++    // (see drawGrid()) so it stays correct, and the hover readout prints the
++    // UNSCALED snapshot value, so the numbers are the real analysed level at any
++    // Sensitivity setting rather than the level times a slider.
+     std::array<float, SpectrumAnalyzer::spectrumPoints> scaledFast {};
+     std::array<float, SpectrumAnalyzer::spectrumPoints> scaledSlow {};
+     std::array<float, SpectrumAnalyzer::spectrumPoints> scaledPeak {};
+ 
+-    std::array<bool, kNumTraces> traceVisible { true, true, true };
++    std::array<bool, kNumTraces> traceVisible { true, true, true, true, true };
+     bool legendCollapsed = false;
+ 
++    // Set from VisualizerMode::prepare(); the frequency axis, hover frequency and
++    // AVG time constant all depend on it.
++    double sampleRate = 48000.0;
++
++    // REFERENCE: a frozen copy of Snapshot::slow (unscaled, like the snapshot itself).
++    bool hasReference = false;
++    std::array<float, SpectrumAnalyzer::spectrumPoints> referenceValues {};
++
++    // 1/3-OCT: LIVE smoothed over a +/-1/6-octave window. Recomputed lazily from
++    // paint() (never from setSnapshot(), which runs for every hidden mode too).
++    std::array<float, SpectrumAnalyzer::spectrumPoints> thirdOctave {};
++    bool thirdOctaveDirty = true;
++
++    // Per-sample-rate tables for the smoothing (rebuilt in rebuildThirdOctaveTables()):
++    // each point's window [bandLo, bandHi], its log-frequency weight, and the running
++    // sum of those weights. prefixPower is per-call scratch, kept here so the
++    // smoothing does not allocate.
++    std::array<int,    SpectrumAnalyzer::spectrumPoints>     bandLo {};
++    std::array<int,    SpectrumAnalyzer::spectrumPoints>     bandHi {};
++    std::array<float,  SpectrumAnalyzer::spectrumPoints>     bandWeight {};
++    std::array<double, SpectrumAnalyzer::spectrumPoints + 1> prefixWeight {};
++    std::array<double, SpectrumAnalyzer::spectrumPoints + 1> prefixPower {};
++
++    DashedCache referenceCache;
++    DashedCache thirdOctaveCache;
++
++    // Legend text that depends on sampleRate, built once in rebuildLegendText()
++    // instead of on every repaint.
++    std::array<juce::String, kNumTraces> legendLabels;
++    juce::String peakHoldHintLabel;
++    juce::String referenceEmptyLabel;
++    juce::String referenceWaitLabel;
++    juce::String footerLabel;
++
+     float hoverX = -1.0f;
+ 
++    // What the pointer is over in the legend: a trace row (0..kNumTraces-1), the
++    // collapse handle (kHandleRow), the REFERENCE clear "x" (kClearRow), or nothing
++    // (-1). Drives the row highlight and the pointing-hand cursor.
++    static constexpr int kHandleRow = kNumTraces;
++    static constexpr int kClearRow  = kNumTraces + 1; // the REFERENCE row's "x"
++    int hoverRow = -1;
++
+     static constexpr float kLeftGutter = 34.0f;
+ 
+     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VisualizerComponent)

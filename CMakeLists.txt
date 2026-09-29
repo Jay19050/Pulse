@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 project(Pulse VERSION 0.1.0 LANGUAGES C CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -30,7 +30,6 @@ juce_generate_juce_header(Pulse)
 target_sources(Pulse
     PRIVATE
         Source/Main.cpp
-	Source/Pulse.rc
         Source/MainComponent.h
         Source/MainComponent.cpp
         Source/AudioEngine.h
@@ -74,12 +73,17 @@ target_sources(Pulse
         Source/DeviceSelectorControl.cpp
         Source/AppearanceSlider.h
         Source/AppearanceSlider.cpp
+        Source/NowPlayingComponent.h
+        Source/NowPlayingComponent.cpp
+        Source/NowPlayingManager.h
+        Source/NowPlayingManager.cpp
 )
 
 target_compile_definitions(Pulse
     PRIVATE
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
+        _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
 )
 
 target_link_libraries(Pulse
@@ -91,4 +95,5 @@ target_link_libraries(Pulse
         juce::juce_recommended_warning_flags
         ole32
         avrt
+        windowsapp
 )

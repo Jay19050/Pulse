@@ -10,6 +10,8 @@
 #include "HeaderBar.h"
 #include "ModeSelectorBar.h"
 #include "SettingsPanel.h"
+#include "NowPlayingManager.h"
+#include "NowPlayingComponent.h"
 
 class MainComponent final : public juce::Component, private juce::Timer
 {
@@ -39,16 +41,22 @@ private:
     AudioEngine audio;
     SpectrumAnalyzer analyzer;
     WaveformBuffer waveform;
+    std::vector<float> waveformScratch; // reused every tick - see WaveformBuffer::getRecent()
     VisualizerModeManager visualizer;
     GoniometerComponent goniometer;
     LevelMeterComponent levelMeter;
 
     HeaderBar header;
     ModeSelectorBar modeSelector { visualizer };
+    juce::String cachedDeviceInfoText; // "device | sample rate" - rebuilt only in startAudio(), not every tick
     SettingsPanel settingsPanel;
     bool settingsOpen = false;
 
     std::atomic<bool> audioActive { false };
+
+    // Entirely independent of the audio/visualizer pipeline.
+    NowPlayingManager nowPlayingManager;
+    NowPlayingComponent nowPlaying;
 
     // Reconnect watchdog: if the capture thread dies mid-session (device
     // unplugged etc), retry at a throttled interval rather than hammering

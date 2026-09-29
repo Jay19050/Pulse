@@ -22,9 +22,14 @@ public:
 
     void push(const float* left, const float* right, int numSamples);
 
-    // Returns the most recent `numSamples` samples, oldest first. If fewer
-    // than `numSamples` have ever been pushed, the result is shorter.
-    std::vector<float> getRecent(int numSamples) const;
+    // Fills `out` with the most recent `numSamples` samples, oldest first.
+    // Resizes `out` if needed but never shrinks its capacity, so a caller
+    // that reuses the same vector every tick (see MainComponent) allocates
+    // once at most, on the very first call, and never again afterward - not
+    // once per tick regardless of which visualizer mode happens to be
+    // active. If fewer than `numSamples` have ever been pushed, `out` ends
+    // up shorter.
+    void getRecent(int numSamples, std::vector<float>& out) const;
 
     void clear();
 

@@ -36,7 +36,9 @@ private:
     ChannelLevels left, right;
     bool active = false;
 
-    juce::CriticalSection dataLock;
+    // SpinLock, not CriticalSection - see GoniometerComponent's identical
+    // choice for the same reason: pushStereo() runs on the audio thread.
+    juce::SpinLock dataLock;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LevelMeterComponent)
 };

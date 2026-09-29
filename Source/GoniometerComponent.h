@@ -34,7 +34,14 @@ private:
 
     bool active = false;
 
-    juce::CriticalSection dataLock;
+    // SpinLock, not CriticalSection: pushStereo() is called directly from
+    // the audio thread (MainComponent's WASAPI block callback), and this is
+    // exactly the short-critical-section producer/consumer pattern a
+    // spinlock is for - matches WaveformBuffer's already-correct choice for
+    // the same situation. A CriticalSection wraps a heavier native OS mutex;
+    // using one here meant every single audio callback took a real OS lock
+    // for a copy that typically finishes in a few microseconds.
+    juce::SpinLock dataLock;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(GoniometerComponent)
 };

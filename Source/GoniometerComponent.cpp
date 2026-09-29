@@ -10,7 +10,7 @@ GoniometerComponent::GoniometerComponent()
 
 void GoniometerComponent::clearTrace()
 {
-    const juce::ScopedLock lock(dataLock);
+    const juce::SpinLock::ScopedLockType lock(dataLock);
     recent.clear();
 }
 
@@ -33,7 +33,7 @@ void GoniometerComponent::pushStereo(const float* left, const float* right, int 
     const int keep  = juce::jmin(numSamples, kMaxDots);
     const int start = numSamples - keep;   // the newest frames in this block
 
-    const juce::ScopedLock lock(dataLock);
+    const juce::SpinLock::ScopedLockType lock(dataLock);
 
     recent.resize(static_cast<size_t>(keep) * 2);
 
@@ -107,7 +107,7 @@ void GoniometerComponent::paint(juce::Graphics& g)
     // standard goniometer convention. Note the sign: (R - L), not (L - R) - get
     // this backwards and a left-only signal plots on the wrong side.
     {
-        const juce::ScopedLock lock(dataLock);
+        const juce::SpinLock::ScopedLockType lock(dataLock);
 
         const size_t frames = recent.size() / 2;
         const float  k = 0.70710678f;   // 1/sqrt(2)
@@ -152,7 +152,7 @@ void GoniometerComponent::paint(juce::Graphics& g)
     float corr = 0.0f;
 
     {
-        const juce::ScopedLock lock(dataLock);
+        const juce::SpinLock::ScopedLockType lock(dataLock);
         corr = correlation(recent);
     }
 

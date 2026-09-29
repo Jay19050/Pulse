@@ -4,7 +4,7 @@
 #include "IconButton.h"
 
 // Top application header: Pulse logo + wordmark + tagline on the left,
-// live/idle status and the settings button on the right.
+// Now Playing / device info / live status / settings on the right.
 //
 // Window controls (minimize/maximize/close) are NOT drawn here - Main.cpp
 // uses setUsingNativeTitleBar(true), so the OS already draws those above this

@@ -19,12 +19,17 @@ void WaveformBuffer::push(const float* left, const float* right, int numSamples)
     written = juce::jmin((size_t) capacity, written + (size_t) numSamples);
 }
 
-std::vector<float> WaveformBuffer::getRecent(int numSamples) const
+void WaveformBuffer::getRecent(int numSamples, std::vector<float>& out) const
 {
     const juce::SpinLock::ScopedLockType sl(lock);
 
     const int available = (int) juce::jmin((size_t) numSamples, written);
-    std::vector<float> out((size_t) available);
+
+    // resize() only reallocates when growing past the vector's current
+    // capacity; since MainComponent passes the same persistent vector every
+    // tick and `available` stabilises quickly, this is a no-op after the
+    // first couple of calls - no heap traffic in steady state.
+    out.resize((size_t) available);
 
     // writePos points at the NEXT slot to be written, i.e. one past the
     // newest sample. Walk backwards from there to fill `out` oldest-first.
@@ -35,8 +40,6 @@ std::vector<float> WaveformBuffer::getRecent(int numSamples) const
         out[(size_t) i] = ring[readPos];
         readPos = (readPos + 1) % (size_t) capacity;
     }
-
-    return out;
 }
 
 void WaveformBuffer::clear()

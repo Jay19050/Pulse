@@ -7,6 +7,7 @@ HeaderBar::HeaderBar()
 
     addAndMakeVisible(settingsButton);
     settingsButton.onClick = [this] { if (onSettingsClicked != nullptr) onSettingsClicked(); };
+
 }
 
 void HeaderBar::setActive(bool isActive)
@@ -32,6 +33,11 @@ void HeaderBar::resized()
     constexpr int buttonSize = 30;
     settingsButton.setBounds(getLocalBounds().removeFromRight(buttonSize + 14)
                                               .withSizeKeepingCentre(buttonSize, buttonSize));
+
+    auto right = getLocalBounds().reduced(18, 0);
+    right.removeFromRight(buttonSize + 14); // settings button + margin
+    right.removeFromRight(90);              // status area (LIVE/IDLE dot + label)
+
 }
 
 void HeaderBar::drawLogo(juce::Graphics& g, juce::Rectangle<float> area) const

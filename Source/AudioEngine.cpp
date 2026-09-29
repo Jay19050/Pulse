@@ -50,8 +50,8 @@ AudioEngine::~AudioEngine()
 bool AudioEngine::start()
 {
     stop();
-    lastError.clear();
-    deviceName.clear();
+    setLastError({});
+    setDeviceName({});
     initComplete.store(false);
     initSucceeded.store(false);
     running.store(true);
@@ -110,12 +110,14 @@ bool AudioEngine::initialiseLoopback(void*& outAudioClient,
     IAudioCaptureClient* capture = nullptr;
     WAVEFORMATEX* mixFormat = nullptr;
     HANDLE eventHandle = nullptr;
+    const WAVEFORMATEXTENSIBLE* ext = nullptr;
+    const REFERENCE_TIME bufferDuration = 200000; // 20 ms
 
     HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr,
                                   CLSCTX_ALL, IID_PPV_ARGS(&enumerator));
     if (FAILED(hr))
     {
-        lastError = "CoCreateInstance(MMDeviceEnumerator) failed";
+        setLastError("CoCreateInstance(MMDeviceEnumerator) failed");
         goto fail;
     }
 
@@ -147,7 +149,7 @@ bool AudioEngine::initialiseLoopback(void*& outAudioClient,
 
     if (FAILED(hr) || endpoint == nullptr)
     {
-        lastError = "Could not find the requested Windows output device";
+        setLastError("Could not find the requested Windows output device");
         goto fail;
     }
 
@@ -160,28 +162,28 @@ bool AudioEngine::initialiseLoopback(void*& outAudioClient,
             if (SUCCEEDED(properties->GetValue(PKEY_Device_FriendlyName, &value))
                && value.vt == VT_LPWSTR && value.pwszVal != nullptr)
             {
-                deviceName = juce::String(value.pwszVal);
+                setDeviceName(juce::String(value.pwszVal));
             }
             PropVariantClear(&value);
             safeRelease(properties);
         }
     }
 
-    if (deviceName.isEmpty())
-        deviceName = "Default Windows output";
+    if (getDeviceName().isEmpty())
+        setDeviceName("Default Windows output");
 
     hr = endpoint->Activate(__uuidof(IAudioClient), CLSCTX_ALL,
                             nullptr, reinterpret_cast<void**>(&client));
     if (FAILED(hr))
     {
-        lastError = "Could not activate the Windows audio client";
+        setLastError("Could not activate the Windows audio client");
         goto fail;
     }
 
     hr = client->GetMixFormat(&mixFormat);
     if (FAILED(hr) || mixFormat == nullptr)
     {
-        lastError = "Could not obtain the Windows audio format";
+        setLastError("Could not obtain the Windows audio format");
         goto fail;
     }
 
@@ -190,7 +192,7 @@ bool AudioEngine::initialiseLoopback(void*& outAudioClient,
     bitsPerSample = static_cast<int>(mixFormat->wBitsPerSample);
     bytesPerSample = juce::jmax(1, static_cast<int>(mixFormat->wBitsPerSample / 8));
 
-    const auto* ext = asExtensible(mixFormat);
+    ext = asExtensible(mixFormat);
     if (ext != nullptr)
         isFloatFormat = (ext->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT);
     else
@@ -198,7 +200,22 @@ bool AudioEngine::initialiseLoopback(void*& outAudioClient,
 
     // Windows render-device loopback. This captures the audio that Windows
     // is rendering without opening an output stream of our own.
-    constexpr REFERENCE_TIME bufferDuration = 1000000; // 100 ms
+    //
+    // Buffer duration is the dominant contributor to Pulse's end-to-end
+    // latency - everything downstream (FFT, smoothing, the 30Hz UI timer)
+    // adds low tens of milliseconds at most, but this single WASAPI setting
+    // was 100ms (1,000,000 in REFERENCE_TIME's 100ns units), which is large
+    // even for a *playback* buffer, let alone a capture-only visualizer.
+    // 20ms is a well-established safe floor for shared-mode, event-driven
+    // WASAPI on typical Windows 10/11 hardware; going lower (e.g. 10ms) is
+    // possible but starts to risk glitching on slower/older machines, and
+    // per the brief's own instruction not to blindly minimise every buffer,
+    // 20ms is the balanced choice here. Because Pulse only *listens* (it
+    // never renders this audio itself), the worst case of an occasional
+    // buffer under-run is a dropped visual frame, not audible crackling -
+    // a meaningfully lower-risk failure mode than for a real playback
+    // engine, which is part of why 20ms is reasonable rather than
+    // conservative-to-the-point-of-100ms.
 
     hr = client->Initialize(
         AUDCLNT_SHAREMODE_SHARED,
@@ -210,28 +227,28 @@ bool AudioEngine::initialiseLoopback(void*& outAudioClient,
 
     if (FAILED(hr))
     {
-        lastError = "IAudioClient::Initialize(loopback) failed";
+        setLastError("IAudioClient::Initialize(loopback) failed");
         goto fail;
     }
 
     eventHandle = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     if (eventHandle == nullptr)
     {
-        lastError = "Could not create the WASAPI event";
+        setLastError("Could not create the WASAPI event");
         goto fail;
     }
 
     hr = client->SetEventHandle(eventHandle);
     if (FAILED(hr))
     {
-        lastError = "Could not attach the WASAPI event";
+        setLastError("Could not attach the WASAPI event");
         goto fail;
     }
 
     hr = client->GetService(IID_PPV_ARGS(&capture));
     if (FAILED(hr))
     {
-        lastError = "Could not obtain the WASAPI capture service";
+        setLastError("Could not obtain the WASAPI capture service");
         goto fail;
     }
 
@@ -293,7 +310,7 @@ void AudioEngine::captureThreadMain()
 
     if (FAILED(hr) && hr != RPC_E_CHANGED_MODE)
     {
-        lastError = "COM initialization failed";
+        setLastError("COM initialization failed");
         initSucceeded.store(false);
         initComplete.store(true);
         initCv.notify_one();
@@ -338,7 +355,7 @@ void AudioEngine::captureThreadMain()
     hr = client->Start();
     if (FAILED(hr))
     {
-        lastError = "WASAPI loopback could not start";
+        setLastError("WASAPI loopback could not start");
         running.store(false);
     }
 
@@ -361,9 +378,9 @@ void AudioEngine::captureThreadMain()
             // Record why and mark the engine stopped so isRunning()/
             // getLastError() reflect reality; MainComponent's watchdog can
             // then decide whether/when to retry.
-            lastError = (packetHr == AUDCLNT_E_DEVICE_INVALIDATED)
-                      ? "Output device disconnected"
-                      : "WASAPI capture error";
+            setLastError(packetHr == AUDCLNT_E_DEVICE_INVALIDATED
+                       ? "Output device disconnected"
+                       : "WASAPI capture error");
             running.store(false);
             break;
         }
@@ -380,9 +397,9 @@ void AudioEngine::captureThreadMain()
                                     &devicePosition, &qpcPosition);
             if (FAILED(hr))
             {
-                lastError = (hr == AUDCLNT_E_DEVICE_INVALIDATED)
-                          ? "Output device disconnected"
-                          : "WASAPI capture error";
+                setLastError(hr == AUDCLNT_E_DEVICE_INVALIDATED
+                           ? "Output device disconnected"
+                           : "WASAPI capture error");
                 running.store(false);
                 break;
             }
@@ -486,18 +503,33 @@ void AudioEngine::processPacket(const unsigned char* data,
         }
     }
 
-    BlockCallback callbackCopy;
-    {
-        const juce::ScopedLock lock(callbackLock);
-        callbackCopy = blockCallback;
-    }
-
-    if (callbackCopy != nullptr)
+    // No lock here: blockCallback is set once, before start(), and never
+    // reassigned while the capture thread runs (see the header's contract).
+    // The previous version took callbackLock and copied the std::function
+    // on every single WASAPI packet - a mutex acquisition and an object
+    // copy in the hottest path in the application, for a value that never
+    // actually changes after startup. This was the single most severe
+    // real-time-audio-safety issue found in this audit: any UI-thread code
+    // holding callbackLock (getDeviceName(), getLastError(), or the setters
+    // below) could, in principle, stall the audio thread on contention.
+    if (blockCallback != nullptr)
     {
         const float* channelData[2] = { leftBuffer.data(), rightBuffer.data() };
-        callbackCopy(channelData, channels > 1 ? 2 : 1,
-                     static_cast<int>(frames), sampleRate.load());
+        blockCallback(channelData, channels > 1 ? 2 : 1,
+                      static_cast<int>(frames), sampleRate.load());
     }
+}
+
+void AudioEngine::setLastError(juce::String message)
+{
+    const juce::ScopedLock lock(callbackLock);
+    lastError = std::move(message);
+}
+
+void AudioEngine::setDeviceName(juce::String name)
+{
+    const juce::ScopedLock lock(callbackLock);
+    deviceName = std::move(name);
 }
 
 juce::String AudioEngine::getDeviceName() const
@@ -514,7 +546,8 @@ juce::String AudioEngine::getLastError() const
 
 void AudioEngine::setBlockCallback(BlockCallback callback)
 {
-    const juce::ScopedLock lock(callbackLock);
+    // Not lock-protected - see the header's contract comment. This must
+    // only ever be called before start().
     blockCallback = std::move(callback);
 }
 

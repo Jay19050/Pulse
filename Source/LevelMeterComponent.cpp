@@ -33,7 +33,7 @@ void LevelMeterComponent::pushStereo(const float* leftData, const float* rightDa
         sumSquaresR += static_cast<double>(r) * r;
     }
 
-    const juce::ScopedLock lock(dataLock);
+    const juce::SpinLock::ScopedLockType lock(dataLock);
 
     left.peak  = peakL;
     right.peak = peakR;
@@ -54,7 +54,7 @@ float LevelMeterComponent::linearToNormalized(float linear)
 
 void LevelMeterComponent::timerCallback()
 {
-    const juce::ScopedLock lock(dataLock);
+    const juce::SpinLock::ScopedLockType lock(dataLock);
 
     auto updateChannel = [](ChannelLevels& ch, bool isActive)
     {
@@ -86,6 +86,16 @@ void LevelMeterComponent::timerCallback()
 
     updateChannel(left, active);
     updateChannel(right, active);
+
+    // This component has no other repaint trigger - GoniometerComponent's
+    // equivalent timer calls repaint() itself (verified), but this one
+    // didn't. It used to work anyway because MainComponent's timer called a
+    // blanket repaint() on the whole window every tick; a recent change
+    // scoped that down to just the visualizer, on the (unverified, wrong)
+    // assumption that this component already repainted itself the same way
+    // Goniometer does. It didn't, so the meters silently froze. Fixing it
+    // here, at the source, rather than re-widening MainComponent's repaint.
+    repaint();
 }
 
 void LevelMeterComponent::drawChannel(juce::Graphics& g, juce::Rectangle<float> area,
@@ -130,7 +140,7 @@ void LevelMeterComponent::paint(juce::Graphics& g)
 
     auto area = bounds.reduced(10.0f);
 
-    const juce::ScopedLock lock(dataLock);
+    const juce::SpinLock::ScopedLockType lock(dataLock);
 
     drawChannel(g, area.removeFromTop(38.0f), left, "L");
     area.removeFromTop(6.0f);

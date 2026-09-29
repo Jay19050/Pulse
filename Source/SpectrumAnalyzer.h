@@ -32,6 +32,7 @@ public:
 
 private:
     void processBlock();
+    void rebuildFrequencyMapping();
 
     double sampleRate = 48000.0;
 
@@ -45,6 +46,19 @@ private:
     std::array<float, fftSize> fifo {};
     std::array<float, fftSize * 2> fftData {};
     int fifoIndex = 0;
+
+    // Log-frequency bin mapping (which FFT bin pair each of the 512 spectrum
+    // points interpolates between, and the interpolation fraction). This
+    // only depends on sampleRate/fftSize/spectrumPoints - none of which
+    // change between prepare() calls - so it's computed once there instead
+    // of every processBlock() call. processBlock() runs on the audio thread
+    // (pushStereo() is called directly from the WASAPI callback), and this
+    // used to involve two std::pow() calls per point, per block: with 50%
+    // overlap at a 2048-point FFT, that's roughly 512 * 2 * ~47 blocks/sec
+    // ≈ 48,000 pow() calls/sec of avoidable work sitting on the real-time
+    // audio path.
+    std::array<int, spectrumPoints> binIndex0 {};
+    std::array<float, spectrumPoints> binFrac {};
 
     std::array<float, spectrumPoints> fast {};
     std::array<float, spectrumPoints> slow {};

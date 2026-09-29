@@ -20,6 +20,35 @@ void SpectrumAnalyzer::prepare(double newSampleRate)
 
     currentLevel = 0.0f;
     active = false;
+
+    rebuildFrequencyMapping();
+}
+
+void SpectrumAnalyzer::rebuildFrequencyMapping()
+{
+    // Exactly the mapping processBlock() used to compute inline, every
+    // point, every block - moved here so it runs once per prepare() call
+    // (startup or a device/sample-rate change) instead of ~47 times/sec on
+    // the audio thread.
+    for (int p = 0; p < spectrumPoints; ++p)
+    {
+        const float t = static_cast<float>(p) / static_cast<float>(spectrumPoints - 1);
+
+        const float minHz = 20.0f;
+        const float maxHz = static_cast<float>(sampleRate * 0.5);
+
+        // Balanced frequency distribution.
+        const float shapedT = std::pow(t, 0.72f);
+        const float hz = minHz * std::pow(maxHz / minHz, shapedT);
+
+        const float bin = hz * static_cast<float>(fftSize) / static_cast<float>(sampleRate);
+
+        const int i0 = juce::jlimit(1, fftSize / 2 - 2, static_cast<int>(bin));
+        const float frac = juce::jlimit(0.0f, 1.0f, bin - static_cast<float>(i0));
+
+        binIndex0[(size_t) p] = i0;
+        binFrac[(size_t) p] = frac;
+    }
 }
 
 void SpectrumAnalyzer::pushStereo(const float* left,
@@ -96,20 +125,9 @@ void SpectrumAnalyzer::processBlock()
 
     for (int p = 0; p < spectrumPoints; ++p)
     {
-        const float t = static_cast<float>(p) / static_cast<float>(spectrumPoints - 1);
-
-        const float minHz = 20.0f;
-        const float maxHz = static_cast<float>(sampleRate * 0.5);
-
-        // Balanced frequency distribution.
-        const float shapedT = std::pow(t, 0.72f);
-        const float hz = minHz * std::pow(maxHz / minHz, shapedT);
-
-        const float bin = hz * static_cast<float>(fftSize) / static_cast<float>(sampleRate);
-
-        const int i0 = juce::jlimit(1, fftSize / 2 - 2, static_cast<int>(bin));
+        const int i0 = binIndex0[(size_t) p];
         const int i1 = i0 + 1;
-        const float frac = juce::jlimit(0.0f, 1.0f, bin - static_cast<float>(i0));
+        const float frac = binFrac[(size_t) p];
 
         // First FFT bin.
         const float real0 = fftData[2 * i0];

@@ -28,6 +28,14 @@ MainComponent::MainComponent()
     };
     settingsPanel.onAppearanceChanged = [this](VisualizerSettings s) { visualizer.setAppearance(s); };
 
+    // Now Playing is a separate metadata path. The manager guarantees that
+    // this callback is delivered on JUCE's message thread, so the component
+    // can be updated directly without touching the real-time audio thread.
+    nowPlayingManager.onChanged = [this](const NowPlayingManager::Info& info)
+    {
+        nowPlaying.setInfo(info);
+    };
+
     visualizer.onResetPeaks = [this] { analyzer.resetPeakHold(); };
 
     audio.setBlockCallback([this](const float* const* channels,
@@ -54,6 +62,9 @@ MainComponent::MainComponent()
     addAndMakeVisible(goniometer);
     addAndMakeVisible(levelMeter);
     addAndMakeVisible(modeSelector);
+    addAndMakeVisible(nowPlaying);
+
+    nowPlayingManager.start();
     // Settings panel is added on demand in setSettingsPanelOpen() so it never
     // eats mouse events over the visualizer while closed.
 
@@ -66,6 +77,7 @@ MainComponent::~MainComponent()
 {
     stopTimer();
     stopAudio();
+    nowPlayingManager.stop();
 }
 
 void MainComponent::startAudio()
@@ -82,7 +94,8 @@ void MainComponent::startAudio()
     audioActive.store(true);
 
     const juce::String deviceName = audio.getDeviceName();
-    header.setDeviceInfo(deviceName + "  |  " + juce::String(audio.getSampleRate(), 0) + " Hz");
+    cachedDeviceInfoText = deviceName + "  |  " + juce::String(audio.getSampleRate(), 0) + " Hz";
+    header.setDeviceInfo(cachedDeviceInfoText);
     settingsPanel.setSampleRate(audio.getSampleRate());
     settingsPanel.setSelectedDevice(audio.getOutputDeviceId());
 }
@@ -141,7 +154,8 @@ void MainComponent::timerCallback()
     // ~50ms window - enough to read as a real waveform, short enough that
     // Waveform mode's per-pixel min/max columns stay dense on screen.
     const int waveformSamples = juce::jmax(256, (int) (audio.getSampleRate() * 0.05));
-    visualizer.updateData(snapshot, waveform.getRecent(waveformSamples));
+    waveform.getRecent(waveformSamples, waveformScratch); // fills the reused buffer, no per-tick allocation
+    visualizer.updateData(snapshot, waveformScratch);
 
     goniometer.setActive(snapshot.active);
     levelMeter.setActive(snapshot.active);
@@ -149,13 +163,21 @@ void MainComponent::timerCallback()
 
     if (audio.isRunning())
     {
+        static const juce::String kListeningText("listening for audio...");
         if (!snapshot.active)
-            header.setDeviceInfo("listening for audio...");
+            header.setDeviceInfo(kListeningText);
         else
-            header.setDeviceInfo(audio.getDeviceName() + "  |  " + juce::String(audio.getSampleRate(), 0) + " Hz");
+            header.setDeviceInfo(cachedDeviceInfoText); // built once in startAudio(), not reconstructed every tick
     }
 
-    repaint();
+    // Only the visualizer needs an unconditional per-tick repaint from this
+    // timer: header/mode-selector/settings only repaint themselves when
+    // their own state actually changes (see their setters above), and
+    // Goniometer/LevelMeter already run their own independent 30Hz timers
+    // that repaint themselves. The previous blanket repaint() on the whole
+    // window forced all of those to redraw every tick regardless, even
+    // though most of them had nothing new to show.
+    visualizer.repaint();
 }
 
 void MainComponent::paint(juce::Graphics& g)
@@ -243,6 +265,14 @@ void MainComponent::resized()
     levelMeter.setBounds(stereoRow);
 
     visualizer.setBounds(area);
+
+    // Keep Now Playing in the upper-right of the visualization area, clear of
+    // the header controls and the bottom goniometer/meter row.
+    const int nowPlayingWidth = juce::jmin(300, juce::jmax(180, area.getWidth() / 3));
+    nowPlaying.setBounds(area.getRight() - nowPlayingWidth - 12,
+                         area.getY() + 10,
+                         nowPlayingWidth,
+                         42);
 
     if (settingsOpen)
         settingsPanel.setBounds(settingsPanelBounds());

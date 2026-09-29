@@ -61,6 +61,10 @@ target_sources(Pulse
         Source/LevelMeterComponent.cpp
         Source/HeaderComponent.h
         Source/HeaderComponent.cpp
+        Source/NowPlayingManager.h
+        Source/NowPlayingManager.cpp
+        Source/NowPlayingComponent.h
+        Source/NowPlayingComponent.cpp
 )
 
 target_compile_definitions(Pulse
@@ -78,4 +82,5 @@ target_link_libraries(Pulse
         juce::juce_recommended_warning_flags
         ole32
         avrt
+        windowsapp
 )

@@ -43,6 +43,12 @@ public:
     void setOutputDeviceId(const juce::String& id);
     juce::String getOutputDeviceId() const;
 
+    // MUST be called before start() (and never again afterward - not
+    // reassignable while the capture thread may be running). This one-shot
+    // contract is what lets the hot audio-callback path read blockCallback
+    // with zero locking (see processPacket()): thread-creation in start()
+    // is itself a synchronisation point, so a callback set beforehand is
+    // guaranteed visible to the capture thread without a mutex.
     void setBlockCallback(BlockCallback callback);
 
 private:
@@ -50,6 +56,14 @@ private:
     bool initialiseLoopback(void*& audioClient, void*& captureClient, void*& endpointDevice, void*& sampleReadyEvent);
     void releaseLoopback(void*& audioClient, void*& captureClient, void*& endpointDevice, void*& sampleReadyEvent);
     void processPacket(const unsigned char* data, unsigned int frames, unsigned long flags);
+
+    // lastError/deviceName are written from the capture thread only in cold
+    // paths (once during initialiseLoopback, or rarely on a disconnect) and
+    // read from the UI thread via the locked getters above - these helpers
+    // are what make that locking actually meaningful (previously the reads
+    // were locked but the writes weren't, which protects nothing).
+    void setLastError(juce::String message);
+    void setDeviceName(juce::String name);
 
     void* audioClient = nullptr;
     void* captureClient = nullptr;
@@ -62,6 +76,10 @@ private:
     juce::String lastError;
     juce::String requestedDeviceId; // "" = system default; guarded by callbackLock
     mutable juce::CriticalSection callbackLock;
+
+    // NOT guarded by callbackLock - see setBlockCallback()'s contract above.
+    // processPacket() (the per-audio-buffer hot path) reads this directly,
+    // with no lock, by design.
     BlockCallback blockCallback;
 
     std::atomic<bool> running { false };
