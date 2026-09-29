@@ -77,6 +77,7 @@ target_sources(Pulse
         Source/NowPlayingComponent.cpp
         Source/NowPlayingManager.h
         Source/NowPlayingManager.cpp
+        Source/Pulse.rc
 )
 
 target_compile_definitions(Pulse

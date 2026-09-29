@@ -26,8 +26,8 @@ ArchitecturesInstallIn64BitMode=x64
 Source: "D:\Pulse\build\Pulse_artefacts\Release\Pulse.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\Pulse"; Filename: "{app}\Pulse.exe"
-Name: "{autodesktop}\Pulse"; Filename: "{app}\Pulse.exe"
+Name: "{autoprograms}\Pulse"; Filename: "{app}\Pulse.exe"; IconFilename: "{app}\Pulse.exe"
+Name: "{autodesktop}\Pulse"; Filename: "{app}\Pulse.exe"; IconFilename: "{app}\Pulse.exe"
 
 [Run]
 Filename: "{app}\Pulse.exe"; Description: "Launch Pulse"; Flags: nowait postinstall skipifsilent
